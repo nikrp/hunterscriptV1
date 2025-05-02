@@ -1,11 +1,11 @@
 --[[
-    Rift Finder Script - AUTO VERSION 1.0
+    Rift Finder Script - AUTO VERSION 1.1
     (Based on Manual V31.1)
 
+    - LOGGING TOGGLE: Added `SendLogsToWebhook` setting. Logs go to console if false, webhook if true.
+    - EMBED UPDATES: Rift found embed has improved time format (M:SS), professional footer, and "How to Use" field.
     - NO GUI: All configuration is done via variables in the SETTINGS section below.
-    - WEBHOOK LOGGING: All print/warn messages are sent to a dedicated LogWebhookURL.
     - AUTO RUN: Executes one search-notify-hop cycle upon running the script.
-    - RIFT NOTIFICATION: Uses raw join link and custom footer.
     - HOP NOTIFICATION: Sent as embed to separate HopWebhookURL.
     - BLACKLIST LIMIT: Clears blacklist after 35 entries.
     - MULTIPLIER OR ABOVE: Configurable via variable.
@@ -20,7 +20,7 @@
     IMPORTANT NOTES:
     1.  Persistent Blacklist: Requires executor support for `readfile`/`writefile`/`isfile`. Adapt names/path! Blacklist now resets after 35 entries.
     2.  Hopping/Blacklist Reliability: Depends on `request` function working correctly. Rate limiting may still occur.
-    3.  Webhook: Also depends on `request` or HttpService not being blocked. Rift finds, hop notifications, and logs now use separate URLs.
+    3.  Webhook: Also depends on `request` or HttpService not being blocked. Rift finds, hop notifications, and logs now use separate URLs. Check `SendLogsToWebhook` setting.
     4.  Rate Limit Errors: If "Too many requests" persists, the delay in `getServers` might need further adjustment.
     5.  Manual Re-execution REQUIRED for each search cycle.
     6.  Game Updates / Executor Changes: Can break the script.
@@ -34,6 +34,9 @@ local RiftWebhookURL = "https://discord.com/api/webhooks/1365884302684065943/xEF
 local HopWebhookURL = "https://discord.com/api/webhooks/1367734421846757396/H3Xu33wUAjxHlqIT64qLixxW77RJcwsg02iZaMgDFBZEQpRZt7Ufo-lILBk_nJdyNPfi" -- *** Webhook for HOPPING notifications ***
 local LogWebhookURL = "https://discord.com/api/webhooks/1367736721919315999/afw2j_udXzS5vCnvZiHaJvYhkxTEOavdNnUrY-bAWlYccbZyuzAqCfE7U9tEB8QszeG9" -- *** Webhook for ALL script logs (print/warn) ***
 
+-- --- Logging ---
+local SendLogsToWebhook = false -- Set to true to send logs to LogWebhookURL, false to send to console
+
 -- --- Blacklist Settings ---
 local BLACKLIST_FILENAME = "RiftFinder_Blacklist_Auto.json" -- Filename for the blacklist. Adjust path if needed. Use a different name than manual version!
 local MAX_BLACKLIST_SIZE = 35 -- Set the maximum size before clearing the blacklist
@@ -41,23 +44,23 @@ local MAX_BLACKLIST_SIZE = 35 -- Set the maximum size before clearing the blackl
 -- --- Rift Selection (Set to true to search for it, false to ignore) ---
 local SearchRifts = {
     -- Eggs
-    ["common-egg"] = false,
-    ["spotted-egg"] = false,
-    ["iceshard-egg"] = false,
-    ["spikey-egg"] = false,
-    ["magma-egg"] = false,
-    ["crystal-egg"] = false,
-    ["lunar-egg"] = false,
+    ["common-egg"] = true,
+    ["spotted-egg"] = true,
+    ["iceshard-egg"] = true,
+    ["spikey-egg"] = true,
+    ["magma-egg"] = true,
+    ["crystal-egg"] = true,
+    ["lunar-egg"] = true,
     ["void-egg"] = true,
-    ["hell-egg"] = false,
+    ["hell-egg"] = true,
     ["nightmare-egg"] = true,
     ["rainbow-egg"] = true,
-    ["infinity-egg"] = false,
-    ["aura-egg"] = false,
+    ["infinity-egg"] = true,
+    ["aura-egg"] = true,
     ["silly-egg"] = true,
-    ["event-3"] = false, -- Throwback Egg
+    ["event-3"] = true, -- Throwback Egg
     -- Chests/Other
-    ["gift-rift"] = false,
+    ["gift-rift"] = true,
     ["golden-chest"] = true,
     ["royal-chest"] = true,
     ["bubble-rift"] = true, -- 250x Sell Rift
@@ -66,7 +69,7 @@ local SearchRifts = {
 -- --- Multiplier Filter Settings ---
 local SearchMultiplierAny = false      -- Set to true to ignore specific multipliers below and find any rift regardless of multi (unless N/A type)
 local SearchMultiplier5x = false      -- Set to true to search for 5x multiplier
-local SearchMultiplier10x = true     -- Set to true to search for 10x multiplier
+local SearchMultiplier10x = false     -- Set to true to search for 10x multiplier
 local SearchMultiplier25x = true      -- Set to true to search for 25x multiplier
 local SearchMultiplierOrAbove = true -- Set to true to search for the lowest selected specific multiplier OR HIGHER
 
@@ -140,51 +143,56 @@ local function saveBlacklist()
     end
 end
 
---// Load Blacklist on Start
-loadBlacklist() -- Attempt to load saved blacklist
-print("Initial blacklist size after load attempt:", countBlacklist()) -- Note: This print will now go to webhook
+-- Store original print/warn functions
+local old_print = print
+local old_warn = warn
 
-
---// Logging Function
+--// Logging Function (Sends to Webhook OR Console)
 local function logMessage(level, ...)
-    if not LogWebhookURL or string.len(LogWebhookURL) < 20 then return end -- Don't try if URL is invalid
-
     local args = {...}
     local messageParts = {}
     for i = 1, #args do
         table.insert(messageParts, tostring(args[i]))
     end
     local message = table.concat(messageParts, "\t") -- Concatenate arguments with tabs
-    local timestamp = os.date("!%Y-%m-%d %H:%M:%SZ")
+    local timestamp = os.date("!%H:%M:%SZ") -- Use UTC time for consistency
     local logPrefix = string.format("[%s] [%s] ", timestamp, level)
+    local fullMessage = logPrefix .. message
 
-    local payload = {
-        content = "```\n" .. logPrefix .. message .. "\n```", -- Use code block for better formatting
-        username = "Rift Script Log"
-    }
+    if SendLogsToWebhook then
+        if not LogWebhookURL or string.len(LogWebhookURL) < 20 then
+            old_warn("LogWebhookURL is invalid, cannot send log via webhook:", fullMessage)
+            return
+        end
+        local payload = {
+            content = "```\n" .. fullMessage .. "\n```", -- Use code block for better formatting
+            username = "Rift Script Log"
+        }
+        local encodeSuccess, encodedPayload = pcall(HttpService.JSONEncode, HttpService, payload)
+        if not encodeSuccess then return end -- Cannot log encode error itself easily
 
-    local encodeSuccess, encodedPayload = pcall(HttpService.JSONEncode, HttpService, payload)
-    if not encodeSuccess then return end -- Cannot log encode error itself easily
-
-    -- Use request if available, otherwise fallback (silently fail if both fail)
-    if request and type(request) == "function" then
-        pcall(request, { Url = LogWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
-    elseif HttpService.RequestAsync then
-        pcall(HttpService.RequestAsync, HttpService, { Url = LogWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
+        -- Use request if available, otherwise fallback (silently fail if both fail)
+        if request and type(request) == "function" then
+            pcall(request, { Url = LogWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
+        elseif HttpService.RequestAsync then
+            pcall(HttpService.RequestAsync, HttpService, { Url = LogWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
+        end
+    else
+        -- Send to console using original functions
+        if level == "WARN" then
+            old_warn(fullMessage)
+        else
+            old_print(fullMessage)
+        end
     end
 end
 
 -- Replace print and warn
-local old_print = print
-local old_warn = warn
 print = function(...) logMessage("INFO", ...) end
 warn = function(...) logMessage("WARN", ...) end
 
--- Initial log messages after replacing print/warn
-print("------------------------------------------------------")
-print("Rift Finder AUTO V1.0 Initializing...")
-print("Logging redirected to webhook.")
-print("Attempted to load blacklist from:", BLACKLIST_FILENAME)
+--// Load Blacklist on Start (Log will go to webhook/console based on setting)
+loadBlacklist()
 print("Initial blacklist size after load attempt:", countBlacklist())
 
 
@@ -479,7 +487,7 @@ local function findTargetRift()
                 -- Find Position/Height (Original Logic)
                 local sP,pP=pcall(function() return island:GetPivot().Position end); if sP and pP then riftData.Position=pP; riftData.Height=math.floor(pP.Y); foundHeight=true; print("  - Height via GetPivot:",riftData.Height) else print("  - GetPivot failed."); local sPos,rPos=pcall(function() if island:IsA("Model") and island.PrimaryPart then return island.PrimaryPart.Position elseif island:IsA("BasePart") then return island.Position else local _,cf=island:GetBoundingBox(); return cf.Position end end); if sPos and rPos then riftData.Position=rPos; riftData.Height=math.floor(rPos.Y); foundHeight=true; print("  - Height via Pos/BBox:",riftData.Height) else print("  - Pos/BBox failed."); local hP=nil; for _,pN in ipairs(PotentialHeightParts) do hP=island:FindFirstChild(pN,true); if hP and hP:IsA("BasePart") then break end end; if hP and hP:IsA("BasePart") then riftData.Position=hP.Position; riftData.Height=math.floor(hP.Position.Y); foundHeight=true; print("  - Height via Part:",riftData.Height) else print("  - Parts failed."); for _,pN in ipairs(PotentialHeightNames) do local hV=island:FindFirstChild(pN,true); if hV and (hV:IsA("NumberValue") or hV:IsA("IntValue")) then riftData.Height=math.floor(hV.Value); foundHeight=true; print("  - Height via Value:",riftData.Height); break end end; if not foundHeight then for _,pN in ipairs(PotentialHeightNames) do local hA=island:GetAttribute(pN); if hA and type(hA)=="number" then riftData.Height=math.floor(hA); foundHeight=true; print("  - Height via Attr:",riftData.Height); break end end end end end end; if not foundHeight then print("  - Height unknown.") end
                 -- Find Time Left (Original Logic)
-                print("  - Searching for Time..."); for _,pN in ipairs(PotentialTimeNames) do local tV=island:FindFirstChild(pN,true); if tV and (tV:IsA("NumberValue") or tV:IsA("IntValue")) then riftData.TimeLeft=math.floor(tV.Value); riftData.TimeSeconds=riftData.TimeLeft; foundTime=true; print("  - Time via Value:",riftData.TimeLeft); break end end; if not foundTime then for _,pN in ipairs(PotentialTimeNames) do local tA=island:GetAttribute(pN); if tA and type(tA)=="number" then riftData.TimeLeft=math.floor(tA); riftData.TimeSeconds=riftData.TimeLeft; foundTime=true; print("  - Time via Attr:",riftData.TimeLeft); break end end end; if not foundTime then for _,d in ipairs(island:GetDescendants()) do if d:IsA("TextLabel") then local txt=d.Text or ""; local lt=string.lower(txt); if lt:match("%d+:%d+") or lt:match("%d+ ?sec") or lt:match("%d+ ?minutes?") then riftData.TimeLeft=txt; riftData.TimeSeconds=parseTime(txt); foundTime=true; print("  - Time via GUI Text:",riftData.TimeLeft,"-> Parsed:",tostring(riftData.TimeSeconds)); break end end end end; if not foundTime then print("  - Time unknown.") end
+                print("  - Searching for Time..."); for _,pN in ipairs(PotentialTimeNames) do local tV=island:FindFirstChild(pN,true); if tV and (tV:IsA("NumberValue") or tV:IsA("IntValue")) then riftData.TimeLeft=math.floor(tV.Value); riftData.TimeSeconds=riftData.TimeLeft; foundTime=true; print("  - Time via Value:", riftData.TimeLeft); break end end; if not foundTime then for _,pN in ipairs(PotentialTimeNames) do local tA=island:GetAttribute(pN); if tA and type(tA)=="number" then riftData.TimeLeft=math.floor(tA); riftData.TimeSeconds=riftData.TimeLeft; foundTime=true; print("  - Time via Attr:",riftData.TimeLeft); break end end end; if not foundTime then for _,d in ipairs(island:GetDescendants()) do if d:IsA("TextLabel") then local txt=d.Text or ""; local lt=string.lower(txt); if lt:match("%d+:%d+") or lt:match("%d+ ?sec") or lt:match("%d+ ?minutes?") then riftData.TimeLeft=txt; riftData.TimeSeconds=parseTime(txt); foundTime=true; print("  - Time via GUI Text:",riftData.TimeLeft,"-> Parsed:",tostring(riftData.TimeSeconds)); break end end end end; if not foundTime then print("  - Time unknown.") end
                 -- Apply Time Filter (Original Logic)
                 if foundTime and riftData.TimeSeconds then if riftData.TimeSeconds < MINIMUM_RIFT_TIME_SECONDS then print(string.format("  - Filter: Skipping, Time %s (%s s) < %d s.",tostring(riftData.TimeLeft),riftData.TimeSeconds,MINIMUM_RIFT_TIME_SECONDS)); passedTimeFilter=false else print(string.format("  - Filter: Time %s (%s s) OK.",tostring(riftData.TimeLeft),riftData.TimeSeconds)); passedTimeFilter=true end else print("  - Time unknown. Assuming passes filter."); passedTimeFilter=true end
             else print("  - Skipping details (Multi Filter fail).") end
@@ -495,6 +503,17 @@ end
 -- Get Player Count
 local function getServerPlayerCount() return #Players:GetPlayers() end
 
+-- Function to format seconds into M:SS
+local function formatSecondsToMSS(totalSeconds)
+    if totalSeconds and type(totalSeconds) == "number" and totalSeconds >= 0 then
+        local minutes = math.floor(totalSeconds / 60)
+        local seconds = totalSeconds % 60
+        return string.format("%d:%02d", minutes, seconds) -- Pad seconds with leading zero if needed
+    else
+        return nil -- Return nil if input is invalid
+    end
+end
+
 -- Main Search and Hop Logic (Instant Hop)
 function startSearchAndHopLogic()
     if BotStarted then print("Logic already running, preventing duplicate run."); return end
@@ -508,13 +527,20 @@ function startSearchAndHopLogic()
     if foundRiftData then
         print("MATCH FOUND! Notifying and hopping immediately...")
         local pCount = getServerPlayerCount()
-        -- *** Use roblox:// link format for potential better joining ***
         local link = string.format("roblox://experiences/start?placeId=%d&gameInstanceId=%s", PlaceId, CurrentJobId)
         local serverMsg = "JobId: " .. (CurrentJobId or "??")
         local title = foundRiftData.DisplayName
         local imgUrl = RiftImageMapping[foundRiftData.NameLower]
         -- *** Updated Footer Text ***
         local footerText = "discord.gg/rifthunter - the best ever rift finding service"
+        -- *** Format Time ***
+        local timeDisplay = tostring(foundRiftData.TimeLeft) -- Default to original text
+        local formattedMSS = formatSecondsToMSS(foundRiftData.TimeSeconds)
+        if formattedMSS then
+            timeDisplay = formattedMSS .. " (" .. tostring(foundRiftData.TimeLeft) .. ")" -- Show M:SS and original text
+        elseif foundRiftData.TimeSeconds then
+             timeDisplay = tostring(foundRiftData.TimeSeconds) .. "s (" .. tostring(foundRiftData.TimeLeft) .. ")" -- Fallback to seconds if formatting failed but seconds exist
+        end
 
         local embed = {
             title = "✅ Rift Found: " .. title,
@@ -522,12 +548,14 @@ function startSearchAndHopLogic()
             timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
             fields = {
                 {name="✨ Multi", value=tostring(foundRiftData.Multiplier), inline=true},
-                {name="🕒 Time", value=tostring(foundRiftData.TimeLeft)..(foundRiftData.TimeSeconds and (" ("..foundRiftData.TimeSeconds.."s)") or ""), inline=true},
+                {name="🕒 Time", value=timeDisplay, inline=true}, -- Use formatted time
                 {name="📏 Height", value=tostring(foundRiftData.Height), inline=true},
                 {name="🧍 Players", value=string.format("%d/%d", pCount, maxPlayers), inline=true},
                 {name="🆔 Server", value=serverMsg, inline=true},
                 -- *** Raw Link Value ***
-                {name="🔗 Join", value=link, inline=false}
+                {name="🔗 Join", value=link, inline=false},
+                -- *** How to Use Field ***
+                {name="💡 How to Use", value="Copy and paste the link into your browser", inline=false}
             },
             footer = { text = footerText }
         }
@@ -546,7 +574,8 @@ end
 
 --// Initial Load Actions (No GUI Creation)
 print("------------------------------------------------------")
-print("Rift Finder AUTO V1.0 Loaded")
+print("Rift Finder AUTO V1.1 Loaded") -- Updated Version
+print(" - Log Destination:", SendLogsToWebhook and "Webhook" or "Console")
 print(" - Attempted to load blacklist from:", BLACKLIST_FILENAME)
 print(" - Blacklist will clear after", MAX_BLACKLIST_SIZE, "entries.")
 print(" - Settings configured in script variables.")
