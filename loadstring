@@ -1,9 +1,9 @@
 --[[
-    Rift Finder Script - AUTO VERSION 1.5
+    Rift Finder Script - AUTO VERSION 1.6
     (Based on Manual V31.1)
 
-    - ALL FINDS WEBHOOK: Added `AllFindsWebhookURL`. Notifications are sent to the specific/default URL AND this URL.
-    - EMBED UPDATES: Rift found embed author name changed to "discord.gg/rifthunter", time field renamed to "Time Remaining".
+    - REVERTED ALL FINDS WEBHOOK: Notifications are now only sent to the specific URL for the rift (or the default RiftWebhookURL). Removed AllFindsWebhookURL setting.
+    - EMBED UPDATES: Rift found embed author name ("discord.gg/rifthunter"), time field name ("Time Remaining"), and raw join link retained.
     - TIME LOGIC REVERTED: Uses original time finding logic.
     - FIND ALL RIFTS: Retained logic to find and notify for *all* matching rifts in a server before hopping.
     - LOGGING TOGGLE: Retained `SendLogsToWebhook` setting.
@@ -36,7 +36,7 @@
 local RiftWebhookURL = "https://discord.com/api/webhooks/1365884302684065943/xEFryRlllaI3-geqOI1VAI4rRrEg1S7O11aEnUBslfHagPaOhJv_N5Ka_rIEp4FsJbWj" -- *** DEFAULT Webhook for RIFT FOUND notifications (used if not listed below) ***
 local HopWebhookURL = "https://discord.com/api/webhooks/1367734421846757396/H3Xu33wUAjxHlqIT64qLixxW77RJcwsg02iZaMgDFBZEQpRZt7Ufo-lILBk_nJdyNPfi" -- *** Webhook for HOPPING notifications ***
 local LogWebhookURL = "https://discord.com/api/webhooks/1367736721919315999/afw2j_udXzS5vCnvZiHaJvYhkxTEOavdNnUrY-bAWlYccbZyuzAqCfE7U9tEB8QszeG9" -- *** Webhook for ALL script logs (print/warn) ***
-local AllFindsWebhookURL = "https://discord.com/api/webhooks/1367753252472619008/T08XZROK0Slu2dxy8575RnGZL8oaj2JxOTqKydQTnvIlsR-O5_iumIMXJbLBbAoBufuI" -- *** NEW: Webhook for ALL rift finds ***
+-- local AllFindsWebhookURL = "..." -- Removed - Notifications only go to specific/default
 
 -- --- Specific Rift Webhooks (Map lowercase rift name to URL) ---
 local SpecificRiftWebhooks = {
@@ -215,60 +215,43 @@ print("Initial blacklist size after load attempt:", countBlacklist())
 
 --// Functions (Rest of the script)
 
--- Send Rift Found Webhook Message (Uses Specific, Default, AND AllFinds URLs)
+-- Send Rift Found Webhook Message (Uses Specific or Default URL) - REVERTED: No longer sends to AllFinds URL
 local function sendRiftFoundNotification(riftNameLower, payloadData)
-    -- Determine the specific/default target webhook URL
+    -- Determine the target webhook URL
     local targetWebhookURL = SpecificRiftWebhooks[riftNameLower] or RiftWebhookURL
+    print("Sending notification for", riftNameLower, "to URL:", targetWebhookURL:sub(1, 50) .. "...") -- Log which URL is used
 
-    -- Function to send the actual request
-    local function sendRequest(urlToSend, notificationType)
-        if not urlToSend or urlToSend == "YOUR_WEBHOOK_URL_HERE" or string.len(urlToSend) < 20 then
-            warn("Webhook URL invalid for:", notificationType)
-            return false
-        end
-
-        local encodeSuccess, encodedPayload = pcall(HttpService.JSONEncode, HttpService, payloadData)
-        if not encodeSuccess then
-            warn("JSONEncode failed for", notificationType, "notification:", encodedPayload)
-            return false
-        end
-
-        local success, response = false, "No request attempt"
-        if request and type(request) == "function" then
-            print("Attempting", notificationType, "webhook via 'request' to", urlToSend:sub(1,50).."...")
-            success, response = pcall(request, { Url = urlToSend, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
-            if success then
-                print(notificationType, "Webhook possibly sent via 'request'.")
-                return true
-            else
-                warn(notificationType, "'request' failed:", response)
-            end
-        else
-            print("'request' not found/usable for", notificationType)
-        end
-
-        print("Falling back to HttpService for", notificationType, "webhook...")
-        success, response = pcall(HttpService.RequestAsync, HttpService, { Url = urlToSend, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
-        if not success then
-            warn("HttpService", notificationType, "webhook failed (Likely blocked):", response)
-            return false
-        else
-            print(notificationType, "Webhook sent via HttpService.")
-            return true
-        end
+    if not targetWebhookURL or targetWebhookURL == "YOUR_WEBHOOK_URL_HERE" or string.len(targetWebhookURL) < 20 then
+        warn("Target Rift Webhook URL invalid for rift:", riftNameLower)
+        return
     end
 
-    -- Send to the specific/default URL first
-    local sentSpecific = sendRequest(targetWebhookURL, "Specific/Default Rift")
+    local encodeSuccess, encodedPayload = pcall(HttpService.JSONEncode, HttpService, payloadData)
+    if not encodeSuccess then
+        warn("JSONEncode failed for rift notification:", encodedPayload)
+        return
+    end
 
-    -- Send to the "All Finds" URL if it's valid and different from the target URL
-    if AllFindsWebhookURL and string.len(AllFindsWebhookURL) >= 20 and AllFindsWebhookURL ~= targetWebhookURL then
-        print("Sending notification for", riftNameLower, "to AllFinds URL...")
-        local sentAll = sendRequest(AllFindsWebhookURL, "All Finds")
-    elseif AllFindsWebhookURL == targetWebhookURL then
-        print("'All Finds' URL is the same as the target URL, notification already sent.")
+    local success, response = false, "No request attempt"
+    if request and type(request) == "function" then
+        print("Attempting Rift webhook via 'request'...")
+        success, response = pcall(request, { Url = targetWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
+        if success then
+            print("Rift Webhook possibly sent via 'request'.")
+            return
+        else
+            warn("'request' failed:", response)
+        end
     else
-         warn("'All Finds' Webhook URL is invalid or not set.")
+        print("'request' not found/usable.")
+    end
+
+    print("Falling back to HttpService for Rift webhook...")
+    success, response = pcall(HttpService.RequestAsync, HttpService, { Url = targetWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
+    if not success then
+        warn("HttpService Rift webhook failed (Likely blocked):", response)
+    else
+        print("Rift Webhook sent via HttpService.")
     end
 end
 
@@ -712,7 +695,7 @@ end
 
 --// Initial Load Actions (No GUI Creation)
 print("------------------------------------------------------")
-print("Rift Finder AUTO V1.5 Loaded") -- Updated Version
+print("Rift Finder AUTO V1.6 Loaded") -- Updated Version
 print(" - Log Destination:", SendLogsToWebhook and "Webhook" or "Console")
 print(" - Attempted to load blacklist from:", BLACKLIST_FILENAME)
 print(" - Blacklist will clear after", MAX_BLACKLIST_SIZE, "entries.")
