@@ -1,8 +1,9 @@
 --[[
-    Rift Finder Script - AUTO VERSION 1.2
+    Rift Finder Script - AUTO VERSION 1.3
     (Based on Manual V31.1)
 
-    - FIND ALL RIFTS: Modified script to find and notify for *all* matching rifts in a server before hopping.
+    - SPECIFIC WEBHOOKS: Added `SpecificRiftWebhooks` table. Notifications for listed rifts go to their specific URL, others use the default `RiftWebhookURL`.
+    - FIND ALL RIFTS: Retained logic to find and notify for *all* matching rifts in a server before hopping.
     - LOGGING TOGGLE: Added `SendLogsToWebhook` setting. Logs go to console if false, webhook if true.
     - EMBED UPDATES: Rift found embed has improved time format (M:SS), professional footer, and "How to Use" field.
     - NO GUI: All configuration is done via variables in the SETTINGS section below.
@@ -11,7 +12,7 @@
     - BLACKLIST LIMIT: Clears blacklist after 35 entries.
     - MULTIPLIER OR ABOVE: Configurable via variable.
     - PERSISTENT BLACKLIST ATTEMPT: Retained functions to load/save the blacklist.
-                                     *** USER ACTION REQUIRED: Replace placeholder function names and
+                                     *** USER ACTION REQUIRED: Replace placeholder file function names and
                                          potentially the filename/path with ones specific to your executor! ***
     - FIND LOGIC: Uses original detail-finding methods.
     - Blacklisting: Uses `_G.visitedServers`.
@@ -31,9 +32,20 @@
 --// ######################## SETTINGS ########################
 
 -- --- Webhook URLs ---
-local RiftWebhookURL = "https://discord.com/api/webhooks/1365884302684065943/xEFryRlllaI3-geqOI1VAI4rRrEg1S7O11aEnUBslfHagPaOhJv_N5Ka_rIEp4FsJbWj" -- *** Webhook for RIFT FOUND notifications ***
+local RiftWebhookURL = "https://discord.com/api/webhooks/1365884302684065943/xEFryRlllaI3-geqOI1VAI4rRrEg1S7O11aEnUBslfHagPaOhJv_N5Ka_rIEp4FsJbWj" -- *** DEFAULT Webhook for RIFT FOUND notifications (used if not listed below) ***
 local HopWebhookURL = "https://discord.com/api/webhooks/1367734421846757396/H3Xu33wUAjxHlqIT64qLixxW77RJcwsg02iZaMgDFBZEQpRZt7Ufo-lILBk_nJdyNPfi" -- *** Webhook for HOPPING notifications ***
 local LogWebhookURL = "https://discord.com/api/webhooks/1367736721919315999/afw2j_udXzS5vCnvZiHaJvYhkxTEOavdNnUrY-bAWlYccbZyuzAqCfE7U9tEB8QszeG9" -- *** Webhook for ALL script logs (print/warn) ***
+
+-- --- Specific Rift Webhooks (Map lowercase rift name to URL) ---
+local SpecificRiftWebhooks = {
+    ["rainbow-egg"] = "https://discord.com/api/webhooks/1367744311008956486/KCHFuRYjpHkpHdz2BjfB2zU9o0Tf43PYLH3WE6iwArMBahLd34_sjvRIomDz5Eph95Pv",
+    ["void-egg"] = "https://discord.com/api/webhooks/1367744483650703440/6jWdoyLd_M2V8eeCROrxhsmwbcHS3BpNZuDEvrFYn1eW1DLtuwCG2odhXHKVGY5IRr81",
+    ["nightmare-egg"] = "https://discord.com/api/webhooks/1367744623904292924/rNja_qhRgIP_YP-LARSwWZksoImL81HjDd-_HWvX5IIDFv1cQzl5GF4FsyckBsmps22k",
+    ["royal-chest"] = "https://discord.com/api/webhooks/1367744720725479494/0phV2HWkXp8Qjbjvmo7MtpOKjPV2rhD-VN2Vl0t5UfoKRRSOCb6wIWIDYGNjRvzAn8c5",
+    ["golden-chest"] = "https://discord.com/api/webhooks/1367744837801087007/-V26OqXY8rhWab_gbTh0W9t3JXXOoL4kh98dPBdaUZUM3XIzECUPNFG9SHerANC-PHqL",
+    ["bubble-rift"] = "https://discord.com/api/webhooks/1367751727809560626/HxjDXhbzkFtn2kvlP-svqAxx2Fp2DBXEP6uDb8RFekTAhDD1hElxWlrvcl0kprEvrNzg", -- 250x Sell Rift
+    ["silly-egg"] = "https://discord.com/api/webhooks/1367751821220777984/BvcLy8ObGDt6b22Ap4E8y6_znd22gh2ilAh8nt0Y6BH0K6RgyGzePLjqN5g44bZnJqwK"
+}
 
 -- --- Logging ---
 local SendLogsToWebhook = false -- Set to true to send logs to LogWebhookURL, false to send to console
@@ -201,14 +213,57 @@ print("Initial blacklist size after load attempt:", countBlacklist())
 
 --// Functions (Rest of the script)
 
--- Send Rift Found Webhook Message (Executor Dependent)
-local function sendWebhookMessage(payloadData)
-    if not RiftWebhookURL or RiftWebhookURL == "YOUR_WEBHOOK_URL_HERE" or string.len(RiftWebhookURL) < 20 then warn("Rift Webhook URL invalid."); return end
-    local playerName = Player and Player.DisplayName or "UnknownPlayer"; local data; if type(payloadData) == "string" then data = {content = payloadData, username = "Rift Finder Bot (" .. playerName .. ")"} elseif type(payloadData) == "table" then data = payloadData else warn("Invalid webhook payload type."); return end
-    local encodeSuccess, encodedPayload = pcall(HttpService.JSONEncode, HttpService, data); if not encodeSuccess then warn("JSONEncode failed:", encodedPayload); return end
-    local success, response = false, "No request attempt"; if request and type(request) == "function" then print("Attempting Rift webhook via 'request'..."); success, response = pcall(request, { Url = RiftWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload }); if success then print("Rift Webhook possibly sent via 'request'."); return else warn("'request' failed:", response) end else print("'request' not found/usable.") end
-    print("Falling back to HttpService for Rift webhook..."); success, response = pcall(HttpService.RequestAsync, HttpService, { Url = RiftWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload }); if not success then warn("HttpService Rift webhook failed (Likely blocked):", response) else print("Rift Webhook sent via HttpService.") end
+-- Send Rift Found Webhook Message (Uses Specific or Default URL)
+local function sendRiftFoundNotification(riftNameLower, payloadData)
+    -- Determine the target webhook URL
+    local targetWebhookURL = SpecificRiftWebhooks[riftNameLower] or RiftWebhookURL
+    print("Sending notification for", riftNameLower, "to URL:", targetWebhookURL:sub(1, 50) .. "...") -- Log which URL is used
+
+    if not targetWebhookURL or targetWebhookURL == "YOUR_WEBHOOK_URL_HERE" or string.len(targetWebhookURL) < 20 then
+        warn("Target Rift Webhook URL invalid for rift:", riftNameLower)
+        return
+    end
+
+    local playerName = Player and Player.DisplayName or "UnknownPlayer"
+    local data
+    if type(payloadData) == "string" then
+        data = {content = payloadData, username = "Rift Finder Bot (" .. playerName .. ")"}
+    elseif type(payloadData) == "table" then
+        data = payloadData -- Assume payload is already formatted correctly (e.g., with username)
+    else
+        warn("Invalid webhook payload type.")
+        return
+    end
+
+    local encodeSuccess, encodedPayload = pcall(HttpService.JSONEncode, HttpService, data)
+    if not encodeSuccess then
+        warn("JSONEncode failed for rift notification:", encodedPayload)
+        return
+    end
+
+    local success, response = false, "No request attempt"
+    if request and type(request) == "function" then
+        print("Attempting Rift webhook via 'request'...")
+        success, response = pcall(request, { Url = targetWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
+        if success then
+            print("Rift Webhook possibly sent via 'request'.")
+            return
+        else
+            warn("'request' failed:", response)
+        end
+    else
+        print("'request' not found/usable.")
+    end
+
+    print("Falling back to HttpService for Rift webhook...")
+    success, response = pcall(HttpService.RequestAsync, HttpService, { Url = targetWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
+    if not success then
+        warn("HttpService Rift webhook failed (Likely blocked):", response)
+    else
+        print("Rift Webhook sent via HttpService.")
+    end
 end
+
 
 -- Send Hopping Webhook Notification (Executor Dependent)
 local function sendHopNotification(reason)
@@ -567,7 +622,8 @@ function startSearchAndHopLogic()
             if imgUrl and imgUrl ~= "PASTE_URL_HERE" and imgUrl:find("https://") then embed.thumbnail = { url = imgUrl }; print(" - Added thumbnail for:", title) else print(" - No valid thumbnail for:", title) end
 
             local botUser = "Rift Finder (" .. (Player and Player.DisplayName or "??") .. ")"
-            sendWebhookMessage({ username = botUser, embeds = { embed } })
+            -- Call the specific notification function, passing the lowercase rift name
+            sendRiftFoundNotification(foundRiftData.NameLower, { username = botUser, embeds = { embed } })
             print(string.format("Notification %d/%d sent for %s (if webhook worked).", i, #allFoundRiftData, title))
             if i < #allFoundRiftData then
                 task.wait(0.5) -- Small delay between notifications if multiple found
@@ -586,7 +642,7 @@ end
 
 --// Initial Load Actions (No GUI Creation)
 print("------------------------------------------------------")
-print("Rift Finder AUTO V1.2 Loaded") -- Updated Version
+print("Rift Finder AUTO V1.3 Loaded") -- Updated Version
 print(" - Log Destination:", SendLogsToWebhook and "Webhook" or "Console")
 print(" - Attempted to load blacklist from:", BLACKLIST_FILENAME)
 print(" - Blacklist will clear after", MAX_BLACKLIST_SIZE, "entries.")
