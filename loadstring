@@ -1,8 +1,8 @@
 --[[
-    Rift Finder Script - AUTO VERSION 1.6
+    Rift Finder Script - AUTO VERSION 1.7
     (Based on Manual V31.1)
 
-    - REVERTED ALL FINDS WEBHOOK: Notifications are now only sent to the specific URL for the rift (or the default RiftWebhookURL). Removed AllFindsWebhookURL setting.
+    - REFACTORED WEBHOOKS: Centralized webhook sending logic into `attemptWebhookSend` function for clarity and consistency.
     - EMBED UPDATES: Rift found embed author name ("discord.gg/rifthunter"), time field name ("Time Remaining"), and raw join link retained.
     - TIME LOGIC REVERTED: Uses original time finding logic.
     - FIND ALL RIFTS: Retained logic to find and notify for *all* matching rifts in a server before hopping.
@@ -17,7 +17,7 @@
                                          potentially the filename/path with ones specific to your executor! ***
     - FIND LOGIC: Uses original detail-finding methods.
     - Blacklisting: Uses `_G.visitedServers`.
-    - NOTE: Webhook/Server List fetching depends heavily on executor's `request` function.
+    - NOTE: Webhook/Server List fetching depends heavily on executor's `request` function. Sending cannot be guaranteed if blocked.
     - You MUST MANUALLY RE-EXECUTE the script for each cycle.
 
     IMPORTANT NOTES:
@@ -36,7 +36,7 @@
 local RiftWebhookURL = "https://discord.com/api/webhooks/1365884302684065943/xEFryRlllaI3-geqOI1VAI4rRrEg1S7O11aEnUBslfHagPaOhJv_N5Ka_rIEp4FsJbWj" -- *** DEFAULT Webhook for RIFT FOUND notifications (used if not listed below) ***
 local HopWebhookURL = "https://discord.com/api/webhooks/1367734421846757396/H3Xu33wUAjxHlqIT64qLixxW77RJcwsg02iZaMgDFBZEQpRZt7Ufo-lILBk_nJdyNPfi" -- *** Webhook for HOPPING notifications ***
 local LogWebhookURL = "https://discord.com/api/webhooks/1367736721919315999/afw2j_udXzS5vCnvZiHaJvYhkxTEOavdNnUrY-bAWlYccbZyuzAqCfE7U9tEB8QszeG9" -- *** Webhook for ALL script logs (print/warn) ***
--- local AllFindsWebhookURL = "..." -- Removed - Notifications only go to specific/default
+-- local AllFindsWebhookURL = "..." -- Example if re-enabled: "https://discord.com/api/webhooks/..."
 
 -- --- Specific Rift Webhooks (Map lowercase rift name to URL) ---
 local SpecificRiftWebhooks = {
@@ -215,44 +215,71 @@ print("Initial blacklist size after load attempt:", countBlacklist())
 
 --// Functions (Rest of the script)
 
--- Send Rift Found Webhook Message (Uses Specific or Default URL) - REVERTED: No longer sends to AllFinds URL
+-- Centralized Webhook Sending Function
+local function attemptWebhookSend(targetUrl, encodedPayload, notificationType)
+    if not targetUrl or targetUrl == "YOUR_WEBHOOK_URL_HERE" or string.len(targetUrl) < 20 then
+        warn("Webhook URL invalid for:", notificationType)
+        return false
+    end
+
+    local success, response = false, "No request attempt"
+    local sent = false
+
+    -- Try 'request' first
+    if request and type(request) == "function" then
+        print("Attempting", notificationType, "webhook via 'request' to", targetUrl:sub(1,50).."...")
+        success, response = pcall(request, { Url = targetUrl, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
+        if success then
+            print(notificationType, "Webhook possibly sent via 'request'.")
+            sent = true -- Assume success if pcall doesn't error
+        else
+            warn(notificationType, "'request' failed:", response)
+        end
+    else
+        print("'request' not found/usable for", notificationType)
+    end
+
+    -- Fallback to HttpService if 'request' failed or wasn't available
+    if not sent then
+        print("Falling back to HttpService for", notificationType, "webhook...")
+        success, response = pcall(HttpService.RequestAsync, HttpService, { Url = targetUrl, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
+        if not success then
+            warn("HttpService", notificationType, "webhook failed (Likely blocked):", response)
+            sent = false
+        else
+            print(notificationType, "Webhook sent via HttpService.")
+            sent = true
+        end
+    end
+    return sent
+end
+
+
+-- Send Rift Found Webhook Message (Uses Specific or Default URL)
 local function sendRiftFoundNotification(riftNameLower, payloadData)
     -- Determine the target webhook URL
     local targetWebhookURL = SpecificRiftWebhooks[riftNameLower] or RiftWebhookURL
-    print("Sending notification for", riftNameLower, "to URL:", targetWebhookURL:sub(1, 50) .. "...") -- Log which URL is used
+    print("Determined target URL for", riftNameLower, ":", targetWebhookURL:sub(1,50).."...")
 
-    if not targetWebhookURL or targetWebhookURL == "YOUR_WEBHOOK_URL_HERE" or string.len(targetWebhookURL) < 20 then
-        warn("Target Rift Webhook URL invalid for rift:", riftNameLower)
-        return
-    end
-
+    -- Encode payload once
     local encodeSuccess, encodedPayload = pcall(HttpService.JSONEncode, HttpService, payloadData)
     if not encodeSuccess then
         warn("JSONEncode failed for rift notification:", encodedPayload)
         return
     end
 
-    local success, response = false, "No request attempt"
-    if request and type(request) == "function" then
-        print("Attempting Rift webhook via 'request'...")
-        success, response = pcall(request, { Url = targetWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
-        if success then
-            print("Rift Webhook possibly sent via 'request'.")
-            return
-        else
-            warn("'request' failed:", response)
-        end
-    else
-        print("'request' not found/usable.")
-    end
+    -- Send to the specific/default URL
+    attemptWebhookSend(targetWebhookURL, encodedPayload, "Rift Found")
 
-    print("Falling back to HttpService for Rift webhook...")
-    success, response = pcall(HttpService.RequestAsync, HttpService, { Url = targetWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
-    if not success then
-        warn("HttpService Rift webhook failed (Likely blocked):", response)
-    else
-        print("Rift Webhook sent via HttpService.")
+    --[[ -- Logic for sending to AllFindsWebhookURL (currently disabled)
+    if AllFindsWebhookURL and string.len(AllFindsWebhookURL) >= 20 and AllFindsWebhookURL ~= targetWebhookURL then
+        print("Sending notification for", riftNameLower, "to AllFinds URL...")
+        attemptWebhookSend(AllFindsWebhookURL, encodedPayload, "All Finds")
+    elseif AllFindsWebhookURL == targetWebhookURL then
+        print("'All Finds' URL is the same as the target URL, notification already sent.")
+    -- else warn("'All Finds' Webhook URL is invalid or not set.")
     end
+    ]]
 end
 
 
@@ -275,17 +302,9 @@ local function sendHopNotification(reason)
     }
     local encodeSuccess, encodedPayload = pcall(HttpService.JSONEncode, HttpService, payloadData)
     if not encodeSuccess then warn("JSONEncode failed for hop notification:", encodedPayload); return end
-    local success, response = false, "No request attempt"
-    if request and type(request) == "function" then
-        print("Attempting Hop webhook via 'request'...")
-        success, response = pcall(request, { Url = HopWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
-        if success then print("Hop Webhook possibly sent via 'request'."); return
-        else warn("Hop 'request' failed:", response) end
-    else print("Hop 'request' not found/usable.") end
-    print("Falling back to HttpService for Hop webhook...")
-    success, response = pcall(HttpService.RequestAsync, HttpService, { Url = HopWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
-    if not success then warn("HttpService Hop webhook failed (Likely blocked):", response)
-    else print("Hop Webhook sent via HttpService.") end
+
+    -- Call the centralized send function
+    attemptWebhookSend(HopWebhookURL, encodedPayload, "Hop Status")
 end
 
 
