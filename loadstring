@@ -44,23 +44,23 @@ local MAX_BLACKLIST_SIZE = 35 -- Set the maximum size before clearing the blackl
 -- --- Rift Selection (Set to true to search for it, false to ignore) ---
 local SearchRifts = {
     -- Eggs
-    ["common-egg"] = true,
-    ["spotted-egg"] = true,
-    ["iceshard-egg"] = true,
-    ["spikey-egg"] = true,
-    ["magma-egg"] = true,
-    ["crystal-egg"] = true,
-    ["lunar-egg"] = true,
+    ["common-egg"] = false,
+    ["spotted-egg"] = false,
+    ["iceshard-egg"] = false,
+    ["spikey-egg"] = false,
+    ["magma-egg"] = false,
+    ["crystal-egg"] = false,
+    ["lunar-egg"] = false,
     ["void-egg"] = true,
-    ["hell-egg"] = true,
+    ["hell-egg"] = false,
     ["nightmare-egg"] = true,
     ["rainbow-egg"] = true,
-    ["infinity-egg"] = true,
-    ["aura-egg"] = true,
+    ["infinity-egg"] = false,
+    ["aura-egg"] = false,
     ["silly-egg"] = true,
-    ["event-3"] = true, -- Throwback Egg
+    ["event-3"] = false, -- Throwback Egg
     -- Chests/Other
-    ["gift-rift"] = true,
+    ["gift-rift"] = false,
     ["golden-chest"] = true,
     ["royal-chest"] = true,
     ["bubble-rift"] = true, -- 250x Sell Rift
@@ -69,7 +69,7 @@ local SearchRifts = {
 -- --- Multiplier Filter Settings ---
 local SearchMultiplierAny = false      -- Set to true to ignore specific multipliers below and find any rift regardless of multi (unless N/A type)
 local SearchMultiplier5x = false      -- Set to true to search for 5x multiplier
-local SearchMultiplier10x = false     -- Set to true to search for 10x multiplier
+local SearchMultiplier10x = true     -- Set to true to search for 10x multiplier
 local SearchMultiplier25x = true      -- Set to true to search for 25x multiplier
 local SearchMultiplierOrAbove = true -- Set to true to search for the lowest selected specific multiplier OR HIGHER
 
