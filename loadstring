@@ -1,20 +1,21 @@
 --[[
-    Rift Finder Script - AUTO VERSION 1.3
+    Rift Finder Script - AUTO VERSION 1.4
     (Based on Manual V31.1)
 
-    - SPECIFIC WEBHOOKS: Added `SpecificRiftWebhooks` table. Notifications for listed rifts go to their specific URL, others use the default `RiftWebhookURL`.
+    - TIME LOGIC REVERTED: Changed time finding logic in `findAllTargetRifts` back to the original method.
+    - SPECIFIC WEBHOOKS: Retained logic for specific rift webhook URLs.
     - FIND ALL RIFTS: Retained logic to find and notify for *all* matching rifts in a server before hopping.
-    - LOGGING TOGGLE: Added `SendLogsToWebhook` setting. Logs go to console if false, webhook if true.
-    - EMBED UPDATES: Rift found embed has improved time format (M:SS), professional footer, and "How to Use" field.
+    - LOGGING TOGGLE: Retained `SendLogsToWebhook` setting.
+    - EMBED UPDATES: Retained improved time format (M:SS), professional footer, and "How to Use" field.
     - NO GUI: All configuration is done via variables in the SETTINGS section below.
     - AUTO RUN: Executes one search-notify-hop cycle upon running the script.
     - HOP NOTIFICATION: Sent as embed to separate HopWebhookURL.
     - BLACKLIST LIMIT: Clears blacklist after 35 entries.
     - MULTIPLIER OR ABOVE: Configurable via variable.
     - PERSISTENT BLACKLIST ATTEMPT: Retained functions to load/save the blacklist.
-                                     *** USER ACTION REQUIRED: Replace placeholder file function names and
+                                     *** USER ACTION REQUIRED: Replace placeholder function names and
                                          potentially the filename/path with ones specific to your executor! ***
-    - FIND LOGIC: Uses original detail-finding methods.
+    - FIND LOGIC: Uses original detail-finding methods (except for time).
     - Blacklisting: Uses `_G.visitedServers`.
     - NOTE: Webhook/Server List fetching depends heavily on executor's `request` function.
     - You MUST MANUALLY RE-EXECUTE the script for each cycle.
@@ -546,10 +547,65 @@ local function findAllTargetRifts() -- Renamed function slightly for clarity
                 print("  - Passed Multi Filter. Finding details...")
                 -- Find Position/Height (Original Logic)
                 local sP,pP=pcall(function() return island:GetPivot().Position end); if sP and pP then riftData.Position=pP; riftData.Height=math.floor(pP.Y); foundHeight=true; print("  - Height via GetPivot:",riftData.Height) else print("  - GetPivot failed."); local sPos,rPos=pcall(function() if island:IsA("Model") and island.PrimaryPart then return island.PrimaryPart.Position elseif island:IsA("BasePart") then return island.Position else local _,cf=island:GetBoundingBox(); return cf.Position end end); if sPos and rPos then riftData.Position=rPos; riftData.Height=math.floor(rPos.Y); foundHeight=true; print("  - Height via Pos/BBox:",riftData.Height) else print("  - Pos/BBox failed."); local hP=nil; for _,pN in ipairs(PotentialHeightParts) do hP=island:FindFirstChild(pN,true); if hP and hP:IsA("BasePart") then break end end; if hP and hP:IsA("BasePart") then riftData.Position=hP.Position; riftData.Height=math.floor(hP.Position.Y); foundHeight=true; print("  - Height via Part:",riftData.Height) else print("  - Parts failed."); for _,pN in ipairs(PotentialHeightNames) do local hV=island:FindFirstChild(pN,true); if hV and (hV:IsA("NumberValue") or hV:IsA("IntValue")) then riftData.Height=math.floor(hV.Value); foundHeight=true; print("  - Height via Value:",riftData.Height); break end end; if not foundHeight then for _,pN in ipairs(PotentialHeightNames) do local hA=island:GetAttribute(pN); if hA and type(hA)=="number" then riftData.Height=math.floor(hA); foundHeight=true; print("  - Height via Attr:",riftData.Height); break end end end end end end; if not foundHeight then print("  - Height unknown.") end
-                -- Find Time Left (Original Logic)
-                print("  - Searching for Time..."); for _,pN in ipairs(PotentialTimeNames) do local tV=island:FindFirstChild(pN,true); if tV and (tV:IsA("NumberValue") or tV:IsA("IntValue")) then riftData.TimeLeft=math.floor(tV.Value); riftData.TimeSeconds=riftData.TimeLeft; foundTime=true; print("  - Time via Value:", riftData.TimeLeft); break end end; if not foundTime then for _,pN in ipairs(PotentialTimeNames) do local tA=island:GetAttribute(pN); if tA and type(tA)=="number" then riftData.TimeLeft=math.floor(tA); riftData.TimeSeconds=riftData.TimeLeft; foundTime=true; print("  - Time via Attr:",riftData.TimeLeft); break end end end; if not foundTime then for _,d in ipairs(island:GetDescendants()) do if d:IsA("TextLabel") then local txt=d.Text or ""; local lt=string.lower(txt); if lt:match("%d+:%d+") or lt:match("%d+ ?sec") or lt:match("%d+ ?minutes?") then riftData.TimeLeft=txt; riftData.TimeSeconds=parseTime(txt); foundTime=true; print("  - Time via GUI Text:",riftData.TimeLeft,"-> Parsed:",tostring(riftData.TimeSeconds)); break end end end end; if not foundTime then print("  - Time unknown.") end
+
+                -- *** Find Time Left (Original Logic - Reverted) ***
+                print("  - Searching for Time (Original Method)...");
+                foundTime = false -- Reset foundTime flag for this island
+                for _, potentialName in ipairs(PotentialTimeNames) do
+                    local timeValueObj = island:FindFirstChild(potentialName, true);
+                    if timeValueObj and (timeValueObj:IsA("NumberValue") or timeValueObj:IsA("IntValue")) then
+                        riftData.TimeLeft = math.floor(timeValueObj.Value); -- Store raw seconds as TimeLeft initially
+                        riftData.TimeSeconds = riftData.TimeLeft;
+                        foundTime = true;
+                        print("  - Time via Value:", riftData.TimeLeft);
+                        break
+                    end
+                end
+                if not foundTime then
+                    for _, potentialName in ipairs(PotentialTimeNames) do
+                        local timeAttribute = island:GetAttribute(potentialName);
+                        if timeAttribute and type(timeAttribute) == "number" then
+                            riftData.TimeLeft = math.floor(timeAttribute);
+                            riftData.TimeSeconds = riftData.TimeLeft;
+                            foundTime = true;
+                            print("  - Time via Attribute:", riftData.TimeLeft);
+                            break
+                        end
+                    end
+                end
+                if not foundTime then
+                    for _, descendant in ipairs(island:GetDescendants()) do
+                        if descendant:IsA("TextLabel") then
+                            local text = descendant.Text or "" ;
+                            local lowerText = string.lower(text);
+                            -- Check for various time formats in text
+                            if string.match(lowerText, "%d+:%d+") or string.match(lowerText, "%d+ ?sec") or string.match(lowerText, "%d+ ?minutes?") then
+                                riftData.TimeLeft = text; -- Store the original text found
+                                riftData.TimeSeconds = parseTime(text); -- Attempt to parse seconds
+                                foundTime = true;
+                                print("  - Time via GUI Text:",riftData.TimeLeft,"-> Parsed Secs:",tostring(riftData.TimeSeconds or "nil"));
+                                break
+                            end
+                        end
+                    end
+                end
+                if not foundTime then print("  - Time unknown.") end
+
                 -- Apply Time Filter (Original Logic)
-                if foundTime and riftData.TimeSeconds then if riftData.TimeSeconds < MINIMUM_RIFT_TIME_SECONDS then print(string.format("  - Filter: Skipping, Time %s (%s s) < %d s.",tostring(riftData.TimeLeft),riftData.TimeSeconds,MINIMUM_RIFT_TIME_SECONDS)); passedTimeFilter=false else print(string.format("  - Filter: Time %s (%s s) OK.",tostring(riftData.TimeLeft),riftData.TimeSeconds)); passedTimeFilter=true end else print("  - Time unknown. Assuming passes filter."); passedTimeFilter=true end
+                if foundTime and riftData.TimeSeconds then
+                    if riftData.TimeSeconds < MINIMUM_RIFT_TIME_SECONDS then
+                         print(string.format("  - Filter: Skipping, Time %s (%s s) < %d s.",tostring(riftData.TimeLeft),riftData.TimeSeconds,MINIMUM_RIFT_TIME_SECONDS));
+                         passedTimeFilter=false
+                    else
+                         print(string.format("  - Filter: Time %s (%s s) OK.",tostring(riftData.TimeLeft),riftData.TimeSeconds));
+                         passedTimeFilter=true
+                    end
+                else
+                    print("  - Time unknown. Assuming passes filter.");
+                    passedTimeFilter=true
+                end
+                -- *** End of Reverted Time Logic ***
+
             else print("  - Skipping details (Multi Filter fail).") end
 
             -- Check if ALL filters passed
@@ -600,9 +656,15 @@ function startSearchAndHopLogic()
             local title = foundRiftData.DisplayName
             local imgUrl = RiftImageMapping[foundRiftData.NameLower]
             local footerText = "discord.gg/rifthunter - the best ever rift finding service"
-            local timeDisplay = tostring(foundRiftData.TimeLeft)
+            -- Format Time Display
+            local timeDisplay = tostring(foundRiftData.TimeLeft) -- Default to original text
             local formattedMSS = formatSecondsToMSS(foundRiftData.TimeSeconds)
-            if formattedMSS then timeDisplay = formattedMSS elseif foundRiftData.TimeSeconds then timeDisplay = tostring(foundRiftData.TimeSeconds) .. "s" end
+            if formattedMSS then
+                timeDisplay = formattedMSS -- Show M:SS if possible
+            elseif foundRiftData.TimeSeconds then
+                 timeDisplay = tostring(foundRiftData.TimeSeconds) .. "s" -- Fallback to seconds if formatting failed but seconds exist
+            end
+
 
             local embed = {
                 title = "✅ Rift Found: " .. title,
@@ -610,7 +672,7 @@ function startSearchAndHopLogic()
                 timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
                 fields = {
                     {name="✨ Multi", value=tostring(foundRiftData.Multiplier), inline=true},
-                    {name="🕒 Time", value=timeDisplay, inline=true},
+                    {name="🕒 Time", value=timeDisplay, inline=true}, -- Use formatted time
                     {name="📏 Height", value=tostring(foundRiftData.Height), inline=true},
                     {name="🧍 Players", value=string.format("%d/%d", pCount, maxPlayers), inline=true},
                     {name="🆔 Server", value=serverMsg, inline=true},
@@ -642,7 +704,7 @@ end
 
 --// Initial Load Actions (No GUI Creation)
 print("------------------------------------------------------")
-print("Rift Finder AUTO V1.3 Loaded") -- Updated Version
+print("Rift Finder AUTO V1.4 Loaded") -- Updated Version
 print(" - Log Destination:", SendLogsToWebhook and "Webhook" or "Console")
 print(" - Attempted to load blacklist from:", BLACKLIST_FILENAME)
 print(" - Blacklist will clear after", MAX_BLACKLIST_SIZE, "entries.")
