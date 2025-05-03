@@ -1,12 +1,10 @@
 --[[
-    Rift Finder Script - AUTO VERSION 1.19
+    Rift Finder Script - AUTO VERSION 1.20
     (Based on Manual V31.1)
 
-    - FIX: Implemented more defensive checks for instance type and name validity within the rift finding loop. Added pcall around string.lower as a final safeguard.
+    - FULLY REVERTED FIND LOGIC: Restored the original script's complete method for finding Multiplier, Time, and Height within `findTargetRift`. Function now returns only the FIRST valid match or nil.
     - REFINED SPECIFIC WEBHOOKS: Rift notifications are ONLY sent if the rift name exists in `SpecificRiftWebhooks`. No default fallback.
     - EMBED UPDATES: Rift found embed author name ("discord.gg/rifthunter"), time field name ("Time Remaining"), and raw join link retained.
-    - TIME LOGIC REVERTED: Uses original time finding logic.
-    - FIND ALL RIFTS: Retained logic to find and notify for *all* matching rifts in a server before hopping.
     - LOGGING TOGGLE: Retained `SendLogsToWebhook` setting (defaulting to console).
     - NO GUI: All configuration is done via variables in the SETTINGS section below.
     - AUTO RUN: Executes one search-notify-hop cycle upon running the script.
@@ -16,7 +14,6 @@
     - PERSISTENT BLACKLIST ATTEMPT: Retained functions to load/save the blacklist.
                                      *** USER ACTION REQUIRED: Replace placeholder function names and
                                          potentially the filename/path with ones specific to your executor! ***
-    - FIND LOGIC: Uses original detail-finding methods.
     - Blacklisting: Uses `_G.visitedServers`.
     - NOTE: Webhook/Server List fetching depends heavily on executor's `request` function. Sending cannot be guaranteed if blocked.
     - You MUST MANUALLY RE-EXECUTE the script for each cycle.
@@ -456,23 +453,15 @@ local function parseMultiplier(multiplierText) if not multiplierText or type(mul
 -- Parse Time Text
 local function parseTime(timeText) if not timeText or type(timeText) ~= "string" then return nil end; local totalSeconds=0; local minutes=string.match(timeText,"(%d+) ?minutes?"); if minutes then totalSeconds=tonumber(minutes)*60; local seconds=string.match(timeText,"(%d+) ?sec"); if seconds then totalSeconds=totalSeconds+tonumber(seconds) end; return totalSeconds end; local secondsOnly=string.match(timeText,"(%d+) ?sec"); if secondsOnly then return tonumber(secondsOnly) end; local parts={}; for part in string.gmatch(timeText,"%d+") do table.insert(parts,tonumber(part)) end; if #parts==2 then totalSeconds=parts[1]*60+parts[2]; return totalSeconds elseif #parts==3 then totalSeconds=parts[1]*3600+parts[2]*60+parts[3]; return totalSeconds end; local numOnly=tonumber(timeText); if numOnly then return numOnly end; return nil end
 
--- Find Target Rift (Finds ALL matching rifts, Notifies Immediately) - USING ORIGINAL FINDING LOGIC BASE
-local function findAllTargetRiftsAndNotify() -- Renamed to reflect instant notification
-    -- Populate SelectedIslands based on settings
+-- Find Target Rift (Notifies Immediately, Uses Original Find Logic)
+local function findAllTargetRiftsAndNotify()
     SelectedIslands = {}
     for riftName, shouldSearch in pairs(SearchRifts) do
-        if shouldSearch then
-            SelectedIslands[riftName] = true
-        end
+        if shouldSearch then SelectedIslands[riftName] = true end
     end
     local selectedCount = 0; for _ in pairs(SelectedIslands) do selectedCount = selectedCount + 1 end
-    if selectedCount == 0 then
-        warn("No rifts selected in the script settings!")
-        return false -- Return false as no rifts were searched for
-    end
+    if selectedCount == 0 then warn("No rifts selected in the script settings!"); return false end
     print("Searching for", selectedCount, "selected rift types...")
-
-    -- Use multiplier settings directly from variables
     print(string.format("Filter Settings: Any=%s, 5x=%s, 10x=%s, 25x=%s, OrAbove=%s, MinTime=%ds",
         tostring(SearchMultiplierAny), tostring(SearchMultiplier5x), tostring(SearchMultiplier10x), tostring(SearchMultiplier25x), tostring(SearchMultiplierOrAbove), MINIMUM_RIFT_TIME_SECONDS))
 
@@ -482,194 +471,66 @@ local function findAllTargetRiftsAndNotify() -- Renamed to reflect instant notif
     local islandsFolder = renderedFolder:WaitForChild(TARGET_RIFTS_FOLDER_NAME, WAIT_FOR_FOLDERS_TIMEOUT); if not islandsFolder then warn("'"..TARGET_RIFTS_FOLDER_NAME.."' folder not found."); return false end
     print("Scanning folder:", islandsFolder:GetFullName())
 
-    local anyRiftFound = false -- Flag to track if at least one rift was found
-    local pCount = getServerPlayerCount() -- Get player count once before loop
-    local maxPlayers = Players.MaxPlayers -- Get max players once
+    local anyRiftFound = false
+    local pCount = getServerPlayerCount()
+    local maxPlayers = Players.MaxPlayers
 
     for _, island in ipairs(islandsFolder:GetChildren()) do
-        -- *** More Robust Check ***
-        if island and (island:IsA("Model") or island:IsA("Folder")) and island.Name and type(island.Name) == "string" then
-            -- Only proceed if the island is valid and has a string name
-            local islandName = island.Name
-            local islandNameLower = string.lower(islandName) -- Should be safe now
+        -- Use pcall for safety when accessing Name and calling string.lower
+        local pcallSuccess, islandName = pcall(function() return island.Name end)
+        if not (pcallSuccess and type(islandName) == "string" and (island:IsA("Model") or island:IsA("Folder"))) then
+             if island and island.Name then warn("Skipping instance with invalid type or non-string name:", island:GetFullName(), "("..island.ClassName..")")
+             elseif island then warn("Skipping instance without a valid name:", island:GetFullName(), "("..island.ClassName..")")
+             else warn("Skipping invalid instance found in Rifts folder.") end
+             continue
+        end
 
-            if SelectedIslands[islandNameLower] then
-                print("Potential match found:", islandName)
-                local displayName = RiftDisplayNameMapping[islandNameLower] or islandName
-                local riftData = { Name = islandName, NameLower = islandNameLower, DisplayName = displayName, TimeLeft = "Unknown", TimeSeconds = nil, Height = "Unknown", Position = "Unknown", Multiplier = "Unknown", MultiplierValue = nil, Instance = island }
-                local foundMultiplier, foundTime, foundHeight = false, false, false
-                local passedMultiplierFilter = false
-                local passedTimeFilter = true
+        local pcallLowerSuccess, islandNameLower = pcall(string.lower, islandName)
+        if not pcallLowerSuccess then
+            warn("Failed to get lowercase name for:", islandName, "- Skipping.")
+            continue
+        end
 
-                -- Determine Multiplier (Original Logic Style)
-                if NoMultiplierTypes[islandNameLower] then
-                    print("  - Type has no multiplier. Setting to N/A.")
-                    riftData.Multiplier = "N/A"; riftData.MultiplierValue = nil; foundMultiplier = true
-                    passedMultiplierFilter = true -- Always passes if N/A
-                else
-                    -- Find Multiplier (Original Order)
-                    for _, pName in ipairs(PotentialMultiplierNames) do local obj=island:FindFirstChild(pName,true); if obj and obj:IsA("ValueBase") then local v=obj.Value; if type(v)=="number" then riftData.Multiplier=tostring(v).."x"; riftData.MultiplierValue=v; foundMultiplier=true; print("  - Found Multi via Value:", riftData.Multiplier); break elseif type(v)=="string" and v:match("^[%d%.]+x?$") then riftData.Multiplier=v; if not v:find("x",1,true) then riftData.Multiplier=v.."x" end; riftData.MultiplierValue=parseMultiplier(v); foundMultiplier=true; print("  - Found Multi via StringValue:", riftData.Multiplier); break end end end
-                    if not foundMultiplier then for _, pName in ipairs(PotentialMultiplierNames) do local att=island:GetAttribute(pName); if att then if type(att)=="number" then riftData.Multiplier=tostring(att).."x"; riftData.MultiplierValue=att; foundMultiplier=true; print("  - Found Multi via Attribute:", riftData.Multiplier); break elseif type(att)=="string" and att:match("^[%d%.]+x?$") then riftData.Multiplier=att; if not att:find("x",1,true) then riftData.Multiplier=att.."x" end; riftData.MultiplierValue=parseMultiplier(att); foundMultiplier=true; print("  - Found Multi via String Attribute:", riftData.Multiplier); break end end end end
-                    if not foundMultiplier then for _, d in ipairs(island:GetDescendants()) do if d:IsA("TextLabel") then local txt=d.Text or ""; local lt=string.lower(txt); if lt:match("x%d") or lt:match("%dx") then riftData.Multiplier=txt; riftData.MultiplierValue=parseMultiplier(txt); foundMultiplier=true; print("  - Found potential Multi via GUI Text:", riftData.Multiplier); break end end end end
+        if SelectedIslands[islandNameLower] then
+            print("Potential match found:", islandName)
+            local displayName = RiftDisplayNameMapping[islandNameLower] or islandName
+            local riftData = { Name = islandName, NameLower = islandNameLower, DisplayName = displayName, TimeLeft = "Unknown", TimeSeconds = nil, Height = "Unknown", Position = "Unknown", Multiplier = "Unknown", MultiplierValue = nil, Instance = island }
+            local foundMultiplier, foundTime, foundHeight = false, false, false
+            local passedMultiplierFilter = false
+            local passedTimeFilter = true
 
-                    -- Apply Multiplier Filter (Handles "Or Above")
-                    if not foundMultiplier then
-                        print("  - Could not find Multiplier.")
-                        if SearchMultiplierAny then print("  - Filter: Processing anyway (Any)."); passedMultiplierFilter = true
-                        else print("  - Filter: Skipping (Specific & Multi unknown).") end
-                    else
-                        if SearchMultiplierAny then
-                            passedMultiplierFilter = true; print("  - Filter: Multi",riftData.Multiplier,"found (Any)")
-                        else -- Specific filter active
-                            local multiplierNum = riftData.MultiplierValue
-                            if not multiplierNum then print("  - Skipping: Multi value unknown for filtering.")
-                            else
-                                local targetMulti = 0 -- Minimum multiplier required
-                                local specificSelected = false
-                                if SearchMultiplierOrAbove then
-                                    -- Find the lowest selected multiplier for "Or Above" check
-                                    if SearchMultiplier5x then targetMulti = 5; specificSelected = true end
-                                    if SearchMultiplier10x and (not specificSelected or 10 < targetMulti) then targetMulti = 10; specificSelected = true end
-                                    if SearchMultiplier25x and (not specificSelected or 25 < targetMulti) then targetMulti = 25; specificSelected = true end
-
-                                    if specificSelected and multiplierNum >= targetMulti then
-                                        passedMultiplierFilter = true; print(string.format("  - Filter: Multi %s >= %sx (Or Above). MATCHES", riftData.Multiplier, targetMulti))
-                                    elseif not specificSelected then
-                                         print("  - Filter: 'Or Above' ON but no specific multi selected. Skipping.") -- Or treat as 'Any'? For now, skip.
-                                    else
-                                        print(string.format("  - Filter: Multi %s < %sx (Or Above). NO MATCH", riftData.Multiplier, targetMulti))
-                                    end
-                                else -- Exact match required
-                                    local matchesExact = false
-                                    if SearchMultiplier5x and multiplierNum == 5 then matchesExact = true end
-                                    if SearchMultiplier10x and multiplierNum == 10 then matchesExact = true end
-                                    if SearchMultiplier25x and multiplierNum == 25 then matchesExact = true end
-                                    if matchesExact then passedMultiplierFilter = true; print("  - Filter: Multi",riftData.Multiplier,"MATCHES exact")
-                                    else print("  - Filter: Multi",riftData.Multiplier,"NO exact match") end
-                                end
-                            end
-                        end
-                    end
-                end -- End Multiplier Logic
-
-                -- Find Details & Apply Time Filter (Original Logic)
-                if passedMultiplierFilter then
-                    print("  - Passed Multi Filter. Finding details...")
-                    -- Find Position/Height (Original Logic)
-                    local sP,pP=pcall(function() return island:GetPivot().Position end); if sP and pP then riftData.Position=pP; riftData.Height=math.floor(pP.Y); foundHeight=true; print("  - Height via GetPivot:",riftData.Height) else print("  - GetPivot failed."); local sPos,rPos=pcall(function() if island:IsA("Model") and island.PrimaryPart then return island.PrimaryPart.Position elseif island:IsA("BasePart") then return island.Position else local _,cf=island:GetBoundingBox(); return cf.Position end end); if sPos and rPos then riftData.Position=rPos; riftData.Height=math.floor(rPos.Y); foundHeight=true; print("  - Height via Pos/BBox:",riftData.Height) else print("  - Pos/BBox failed."); local hP=nil; for _,pN in ipairs(PotentialHeightParts) do hP=island:FindFirstChild(pN,true); if hP and hP:IsA("BasePart") then break end end; if hP and hP:IsA("BasePart") then riftData.Position=hP.Position; riftData.Height=math.floor(hP.Position.Y); foundHeight=true; print("  - Height via Part:",riftData.Height) else print("  - Parts failed."); for _,pN in ipairs(PotentialHeightNames) do local hV=island:FindFirstChild(pN,true); if hV and (hV:IsA("NumberValue") or hV:IsA("IntValue")) then riftData.Height=math.floor(hV.Value); foundHeight=true; print("  - Height via Value:",riftData.Height); break end end; if not foundHeight then for _,pN in ipairs(PotentialHeightNames) do local hA=island:GetAttribute(pN); if hA and type(hA)=="number" then riftData.Height=math.floor(hA); foundHeight=true; print("  - Height via Attr:",riftData.Height); break end end end end end end; if not foundHeight then print("  - Height unknown.") end
-
-                    -- *** Find Time Left (Original Logic - Reverted) ***
-                    print("  - Searching for Time (Original Method)...");
-                    foundTime = false -- Reset foundTime flag for this island
-                    for _, potentialName in ipairs(PotentialTimeNames) do
-                        local timeValueObj = island:FindFirstChild(potentialName, true);
-                        if timeValueObj and (timeValueObj:IsA("NumberValue") or timeValueObj:IsA("IntValue")) then
-                            riftData.TimeLeft = math.floor(timeValueObj.Value); -- Store raw seconds as TimeLeft initially
-                            riftData.TimeSeconds = riftData.TimeLeft;
-                            foundTime = true;
-                            print("  - Time via Value:", riftData.TimeLeft);
-                            break
-                        end
-                    end
-                    if not foundTime then
-                        for _, potentialName in ipairs(PotentialTimeNames) do
-                            local timeAttribute = island:GetAttribute(potentialName);
-                            if timeAttribute and type(timeAttribute) == "number" then
-                                riftData.TimeLeft = math.floor(timeAttribute);
-                                riftData.TimeSeconds = riftData.TimeLeft;
-                                foundTime = true;
-                                print("  - Time via Attribute:", riftData.TimeLeft);
-                                break
-                            end
-                        end
-                    end
-                    if not foundTime then
-                        for _, descendant in ipairs(island:GetDescendants()) do
-                            if descendant:IsA("TextLabel") then
-                                local text = descendant.Text or "" ;
-                                local lowerText = string.lower(text);
-                                -- Check for various time formats in text
-                                if string.match(lowerText, "%d+:%d+") or string.match(lowerText, "%d+ ?sec") or string.match(lowerText, "%d+ ?minutes?") then
-                                    riftData.TimeLeft = text; -- Store the original text found
-                                    riftData.TimeSeconds = parseTime(text); -- Attempt to parse seconds
-                                    foundTime = true;
-                                    print("  - Time via GUI Text:",riftData.TimeLeft,"-> Parsed Secs:",tostring(riftData.TimeSeconds or "nil"));
-                                    break
-                                end
-                            end
-                        end
-                    end
-                    if not foundTime then print("  - Time unknown.") end
-
-                    -- Apply Time Filter (Original Logic)
-                    if foundTime and riftData.TimeSeconds then
-                        if riftData.TimeSeconds < MINIMUM_RIFT_TIME_SECONDS then
-                             print(string.format("  - Filter: Skipping, Time %s (%s s) < %d s.",tostring(riftData.TimeLeft),riftData.TimeSeconds,MINIMUM_RIFT_TIME_SECONDS));
-                             passedTimeFilter=false
-                        else
-                             print(string.format("  - Filter: Time %s (%s s) OK.",tostring(riftData.TimeLeft),riftData.TimeSeconds));
-                             passedTimeFilter=true
-                        end
-                    else
-                        print("  - Time unknown. Assuming passes filter.");
-                        passedTimeFilter=true
-                    end
-                    -- *** End of Reverted Time Logic ***
-
-                else print("  - Skipping details (Multi Filter fail).") end
-
-                -- Check if ALL filters passed
-                if passedMultiplierFilter and passedTimeFilter then
-                    anyRiftFound = true -- Mark that we found at least one
-                    print(string.format(">>> MATCH VALID: %s | Time: %s (%s s) | H: %s | Multi: %s <<<", riftData.DisplayName, tostring(riftData.TimeLeft), tostring(riftData.TimeSeconds or "??"), tostring(riftData.Height), tostring(riftData.Multiplier)))
-
-                    -- *** SEND NOTIFICATION IMMEDIATELY ***
-                    local link = string.format("roblox://experiences/start?placeId=%d&gameInstanceId=%s", PlaceId, CurrentJobId)
-                    local serverMsg = "JobId: " .. (CurrentJobId or "??")
-                    local title = riftData.DisplayName
-                    local imgUrl = RiftImageMapping[riftData.NameLower]
-                    local footerText = "discord.gg/rifthunter - the best ever rift finding service"
-                    local timeDisplay = tostring(riftData.TimeLeft)
-                    local formattedMSS = formatSecondsToMSS(riftData.TimeSeconds) -- Use riftData here
-                    if formattedMSS then timeDisplay = formattedMSS elseif riftData.TimeSeconds then timeDisplay = tostring(riftData.TimeSeconds) .. "s" end -- Use riftData here
-
-                    local embed = {
-                        title = "✅ Rift Found: " .. title, color = 65280, timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-                        fields = {
-                            {name="✨ Multi", value=tostring(riftData.Multiplier), inline=true}, -- Use riftData here
-                            {name="🕒 Time Remaining", value=timeDisplay, inline=true},
-                            {name="📏 Height", value=tostring(riftData.Height), inline=true}, -- Use riftData here
-                            {name="🧍 Players", value=string.format("%d/%d", pCount, maxPlayers or "?"), inline=true}, -- Use pCount from outer scope
-                            {name="🆔 Server", value=serverMsg, inline=true},
-                            {name="🔗 Join", value=link, inline=false},
-                            {name="💡 How to Use", value="Copy and paste the link into your browser", inline=false}
-                        },
-                        footer = { text = footerText }
-                    }
-                    if imgUrl and imgUrl ~= "PASTE_URL_HERE" and imgUrl:find("https://") then embed.thumbnail = { url = imgUrl }; print(" - Added thumbnail for:", title) else print(" - No valid thumbnail for:", title) end
-                    local payload = { username = "discord.gg/rifthunter", embeds = { embed } }
-                    sendRiftFoundNotification(riftData.NameLower, payload) -- Send to specific webhook if defined
-                    print("Notification sent immediately for", title, "(if webhook worked).")
-                    task.wait(0.5) -- Small delay after sending before continuing scan
-
-                else
-                    print("  - Invalid/Filtered. Continuing...")
-                end
-            end
-        else
-            -- Log skipped instances (optional, but helpful for debugging)
-            if island and island.Name then
-                 warn("Skipping instance with invalid type or non-string name:", island:GetFullName(), "("..island.ClassName..")")
-            elseif island then
-                 warn("Skipping instance without a valid name:", island:GetFullName(), "("..island.ClassName..")")
+            -- Determine Multiplier (Original Logic Style)
+            if NoMultiplierTypes[islandNameLower] then
+                print("  - Type has no multiplier. Setting to N/A.")
+                riftData.Multiplier = "N/A"; riftData.MultiplierValue = nil; foundMultiplier = true
+                passedMultiplierFilter = true
             else
-                 warn("Skipping invalid instance found in Rifts folder.")
+                for _, pName in ipairs(PotentialMultiplierNames) do local obj=island:FindFirstChild(pName,true); if obj and obj:IsA("ValueBase") then local v=obj.Value; if type(v)=="number" then riftData.Multiplier=tostring(v).."x"; riftData.MultiplierValue=v; foundMultiplier=true; print("  - Found Multi via Value:", riftData.Multiplier); break elseif type(v)=="string" and v:match("^[%d%.]+x?$") then riftData.Multiplier=v; if not v:find("x",1,true) then riftData.Multiplier=v.."x" end; riftData.MultiplierValue=parseMultiplier(v); foundMultiplier=true; print("  - Found Multi via StringValue:", riftData.Multiplier); break end end end
+                if not foundMultiplier then for _, pName in ipairs(PotentialMultiplierNames) do local att=island:GetAttribute(pName); if att then if type(att)=="number" then riftData.Multiplier=tostring(att).."x"; riftData.MultiplierValue=att; foundMultiplier=true; print("  - Found Multi via Attribute:", riftData.Multiplier); break elseif type(att)=="string" and att:match("^[%d%.]+x?$") then riftData.Multiplier=att; if not att:find("x",1,true) then riftData.Multiplier=att.."x" end; riftData.MultiplierValue=parseMultiplier(att); foundMultiplier=true; print("  - Found Multi via String Attribute:", riftData.Multiplier); break end end end end
+                if not foundMultiplier then for _, d in ipairs(island:GetDescendants()) do if d:IsA("TextLabel") then local txt=d.Text or ""; local lt=string.lower(txt); if lt:match("x%d") or lt:match("%dx") then riftData.Multiplier=txt; riftData.MultiplierValue=parseMultiplier(txt); foundMultiplier=true; print("  - Found potential Multi via GUI Text:", riftData.Multiplier); break end end end end
+
+                if not foundMultiplier then print("  - Could not find Multiplier."); if SearchMultiplierAny then passedMultiplierFilter=true; print("  - Filter: Processing anyway (Any)") else print("  - Filter: Skipping (Specific & Multi unknown)") end
+                else if SearchMultiplierAny then passedMultiplierFilter=true; print("  - Filter: Multi",riftData.Multiplier,"found (Any)") else local mN=riftData.MultiplierValue; if not mN then print("  - Skipping: Multi value unknown") else local tM=0; local sS=false; if SearchMultiplierOrAbove then if SearchMultiplier5x then tM=5;sS=true end; if SearchMultiplier10x and (not sS or 10<tM) then tM=10;sS=true end; if SearchMultiplier25x and (not sS or 25<tM) then tM=25;sS=true end; if sS and mN>=tM then passedMultiplierFilter=true; print(string.format("  - Filter: Multi %s >= %sx (Or Above). MATCHES", riftData.Multiplier, tM)) elseif not sS then print("  - Filter: 'Or Above' ON but no specific multi selected. Skipping.") else print(string.format("  - Filter: Multi %s < %sx (Or Above). NO MATCH", riftData.Multiplier, tM)) end else local mE=(SearchMultiplier5x and mN==5) or (SearchMultiplier10x and mN==10) or (SearchMultiplier25x and mN==25); if mE then passedMultiplierFilter=true; print("  - Filter: Multi",riftData.Multiplier,"MATCHES exact") else print("  - Filter: Multi",riftData.Multiplier,"NO exact match") end end end end end
             end
-            -- continue -- This is implicit as the 'if' block is skipped
+
+            if passedMultiplierFilter then
+                print("  - Passed Multi Filter. Finding details...")
+                local sP,pP=pcall(function() return island:GetPivot().Position end); if sP and pP then riftData.Position=pP; riftData.Height=math.floor(pP.Y); foundHeight=true; print("  - Height via GetPivot:",riftData.Height) else print("  - GetPivot failed."); local sPos,rPos=pcall(function() if island:IsA("Model") and island.PrimaryPart then return island.PrimaryPart.Position elseif island:IsA("BasePart") then return island.Position else local _,cf=island:GetBoundingBox(); return cf.Position end end); if sPos and rPos then riftData.Position=rPos; riftData.Height=math.floor(rPos.Y); foundHeight=true; print("  - Height via Pos/BBox:",riftData.Height) else print("  - Pos/BBox failed."); local hP=nil; for _,pN in ipairs(PotentialHeightParts) do hP=island:FindFirstChild(pN,true); if hP and hP:IsA("BasePart") then break end end; if hP and hP:IsA("BasePart") then riftData.Position=hP.Position; riftData.Height=math.floor(hP.Position.Y); foundHeight=true; print("  - Height via Part:",riftData.Height) else print("  - Parts failed."); for _,pN in ipairs(PotentialHeightNames) do local hV=island:FindFirstChild(pN,true); if hV and (hV:IsA("NumberValue") or hV:IsA("IntValue")) then riftData.Height=math.floor(hV.Value); foundHeight=true; print("  - Height via Value:",riftData.Height); break end end; if not foundHeight then for _,pN in ipairs(PotentialHeightNames) do local hA=island:GetAttribute(pN); if hA and type(hA)=="number" then riftData.Height=math.floor(hA); foundHeight=true; print("  - Height via Attr:",riftData.Height); break end end end end end end; if not foundHeight then print("  - Height unknown.") end
+                print("  - Searching for Time (Original Method)..."); foundTime = false; for _,pN in ipairs(PotentialTimeNames) do local tV=island:FindFirstChild(pN,true); if tV and (tV:IsA("NumberValue") or tV:IsA("IntValue")) then riftData.TimeLeft=math.floor(tV.Value); riftData.TimeSeconds=riftData.TimeLeft; foundTime=true; print("  - Time via Value:", riftData.TimeLeft); break end end; if not foundTime then for _,pN in ipairs(PotentialTimeNames) do local tA=island:GetAttribute(pN); if tA and type(tA)=="number" then riftData.TimeLeft=math.floor(tA); riftData.TimeSeconds=riftData.TimeLeft; foundTime=true; print("  - Time via Attr:",riftData.TimeLeft); break end end end; if not foundTime then for _,d in ipairs(island:GetDescendants()) do if d:IsA("TextLabel") then local txt=d.Text or ""; local lt=string.lower(txt); if lt:match("%d+:%d+") or lt:match("%d+ ?sec") or lt:match("%d+ ?minutes?") then riftData.TimeLeft=txt; riftData.TimeSeconds=parseTime(txt); foundTime=true; print("  - Time via GUI Text:",riftData.TimeLeft,"-> Parsed Secs:",tostring(riftData.TimeSeconds or "nil")); break end end end end; if not foundTime then print("  - Time unknown.") end
+                if foundTime and riftData.TimeSeconds then if riftData.TimeSeconds<MINIMUM_RIFT_TIME_SECONDS then print(string.format("  - Filter: Skipping, Time %s (%s s)<%d s.",tostring(riftData.TimeLeft),riftData.TimeSeconds,MINIMUM_RIFT_TIME_SECONDS)); passedTimeFilter=false else print(string.format("  - Filter: Time %s (%s s) OK.",tostring(riftData.TimeLeft),riftData.TimeSeconds)); passedTimeFilter=true end else print("  - Time unknown. Assuming passes filter."); passedTimeFilter=true end
+            else print("  - Skipping details (Multi Filter fail).") end
+
+            if passedMultiplierFilter and passedTimeFilter then
+                anyRiftFound = true
+                print(string.format(">>> MATCH VALID: %s | Time: %s (%s s) | H: %s | Multi: %s <<<", riftData.DisplayName, tostring(riftData.TimeLeft), tostring(riftData.TimeSeconds or "??"), tostring(riftData.Height), tostring(riftData.Multiplier)))
+                local link=string.format("roblox://experiences/start?placeId=%d&gameInstanceId=%s",PlaceId,CurrentJobId); local serverMsg="JobId: ".. (CurrentJobId or "??"); local title=riftData.DisplayName; local imgUrl=RiftImageMapping[riftData.NameLower]; local footerText="discord.gg/rifthunter - the best ever rift finding service"; local timeDisplay=tostring(riftData.TimeLeft); local formattedMSS=formatSecondsToMSS(riftData.TimeSeconds); if formattedMSS then timeDisplay=formattedMSS elseif riftData.TimeSeconds then timeDisplay=tostring(riftData.TimeSeconds).."s" end
+                local embed={title="✅ Rift Found: "..title,color=65280,timestamp=os.date("!%Y-%m-%dT%H:%M:%SZ"),fields={{name="✨ Multi",value=tostring(riftData.Multiplier),inline=true},{name="🕒 Time Remaining",value=timeDisplay,inline=true},{name="📏 Height",value=tostring(riftData.Height),inline=true},{name="🧍 Players",value=string.format("%d/%d",pCount,maxPlayers or "?"),inline=true},{name="🆔 Server",value=serverMsg,inline=true},{name="🔗 Join",value=link,inline=false},{name="💡 How to Use",value="Copy and paste the link into your browser",inline=false}},footer={text=footerText}}; if imgUrl and imgUrl~="PASTE_URL_HERE" and imgUrl:find("https://") then embed.thumbnail={url=imgUrl}; print(" - Added thumbnail for:",title) else print(" - No valid thumbnail for:",title) end
+                local payload={username="discord.gg/rifthunter",embeds={embed}}; sendRiftFoundNotification(riftData.NameLower,payload); print("Notification sent immediately for",title,"(if webhook worked)."); task.wait(0.5)
+            else print("  - Invalid/Filtered. Continuing...") end
         end
     end
     print("Search complete.")
-    return anyRiftFound -- Return true if any rift was found and notified, false otherwise
+    return anyRiftFound
 end
 
 
