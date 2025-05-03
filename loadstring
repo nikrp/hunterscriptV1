@@ -1,13 +1,12 @@
 --[[
     Rift Finder Script for Bubble Gum Simulator Infinity (or similar games)
-    AUTO VERSION: V1.3 - Uses Notifier Send Logic, Hop Notifications Disabled
+    AUTO VERSION: V1.6 - All + Specific Notify, Notifier Send Logic, Hop Notify Disabled
 
     FEATURES:
     - NO GUI: Configuration is done via boolean variables in the settings below.
-    - AUTO RUN: Executes search, notifies (All Finds Only), and hops automatically upon execution.
-    - WEBHOOK SENDING LOGIC: Uses the request/HttpService fallback mechanism from the provided notifier script.
-    - SIMPLIFIED WEBHOOKS (Rift Finds):
-        - Rift found notifications are ONLY sent to the 'AllFindsWebhookURL'.
+    - AUTO RUN: Executes search, notifies (All + Specific), and hops automatically upon execution.
+    - DUAL NOTIFY: Sends webhook notification to BOTH 'AllFindsWebhookURL' AND the specific webhook (if configured) for matching rifts.
+    - WEBHOOK SENDING LOGIC: Uses the request/HttpService fallback mechanism from V1.4.
     - HOP NOTIFICATIONS DISABLED: No webhook sent when hopping servers.
     - ENHANCED DEBUGGING: Retains detailed logging for webhook sending failures.
     - MULTI-FIND: Finds and notifies for ALL matching rifts in a server before hopping.
@@ -18,7 +17,7 @@
     - BLACKLIST: Retains persistent blacklist logic with size limit.
 
     *** USER ACTION REQUIRED: ***
-    1. CONFIGURE WEBHOOKS: Fill in 'AllFindsWebhookURL'. Optionally configure 'LogWebhookURL'. ('HopWebhookURL' & 'SpecificRiftWebhooks' are ignored for notifications).
+    1. CONFIGURE WEBHOOKS: Fill in 'AllFindsWebhookURL'. Ensure 'SpecificRiftWebhooks' table has correct URLs. Optionally configure 'LogWebhookURL'. ('HopWebhookURL' is ignored).
     2. CONFIGURE SEARCH: Set 'true' or 'false' for each Rift Type and Multiplier Filter.
     3. CONFIGURE LOGGING: Set 'SendLogsToWebhook' to 'true' if you want logs sent there.
     4. EXECUTOR SUPPORT: Blacklist persistence requires executor support for file operations (readfile/writefile/isfile). Adapt BLACKLIST_FILENAME path if needed.
@@ -30,9 +29,21 @@
 --//========================================================================\\
 
 -- *** Core Webhooks (REQUIRED) ***
-local AllFindsWebhookURL = "https://discord.com/api/webhooks/1367753252472619008/T08XZROK0Slu2dxy8575RnGZL8oaj2JxOTqKydQTnvIlsR-O5_iumIMXJbLBbAoBufuI" -- *** Rift notifications ONLY go here ***
+local AllFindsWebhookURL = "https://discord.com/api/webhooks/1367753252472619008/T08XZROK0Slu2dxy8575RnGZL8oaj2JxOTqKydQTnvIlsR-O5_iumIMXJbLBbAoBufuI" -- *** All rift notifications go here ***
 local HopWebhookURL = "YOUR_HOP_WEBHOOK_URL_HERE" -- *** No longer used - Hop notifications are disabled ***
--- local SpecificRiftWebhooks = { ... } -- *** No longer used for rift notifications ***
+
+-- *** Specific Rift Webhooks (REQUIRED for specific notifications) ***
+-- Notifications will ALSO be sent here if a rift matches a key.
+local SpecificRiftWebhooks = {
+    ["rainbow-egg"] = "https://discord.com/api/webhooks/1367744311008956486/KCHFuRYjpHkpHdz2BjfB2zU9o0Tf43PYLH3WE6iwArMBahLd34_sjvRIomDz5Eph95Pv",
+    ["void-egg"] = "https://discord.com/api/webhooks/1367744483650703440/6jWdoyLd_M2V8eeCROrxhsmwbcHS3BpNZuDEvrFYn1eW1DLtuwCG2odhXHKVGY5IRr81",
+    ["nightmare-egg"] = "https://discord.com/api/webhooks/1367744623904292924/rNja_qhRgIP_YP-LARSwWZksoImL81HjDd-_HWvX5IIDFv1cQzl5GF4FsyckBsmps22k",
+    ["royal-chest"] = "https://discord.com/api/webhooks/1367744720725479494/0phV2HWkXp8Qjbjvmo7MtpOKjPV2rhD-VN2Vl0t5UfoKRRSOCb6wIWIDYGNjRvzAn8c5",
+    ["golden-chest"] = "https://discord.com/api/webhooks/1367744837801087007/-V26OqXY8rhWab_gbTh0W9t3JXXOoL4kh98dPBdaUZUM3XIzECUPNFG9SHerANC-PHqL",
+    ["bubble-rift"] = "https://discord.com/api/webhooks/1367751727809560626/HxjDXhbzkFtn2kvlP-svqAxx2Fp2DBXEP6uDb8RFekTAhDD1hElxWlrvcl0kprEvrNzg", -- 250x bubble
+    ["silly-egg"] = "https://discord.com/api/webhooks/1367751821220777984/BvcLy8ObGDt6b22Ap4E8y6_znd22gh2ilAh8nt0Y6BH0K6RgyGzePLjqN5g44bZnJqwK"
+    -- Add more entries here if needed: ["rift-internal-name"] = "WEBHOOK_URL",
+}
 
 -- *** Optional Log Webhook ***
 local LogWebhookURL = "https://discord.com/api/webhooks/1367736721919315999/afw2j_udXzS5vCnvZiHaJvYhkxTEOavdNnUrY-bAWlYccbZyuzAqCfE7U9tEB8QszeG9" -- Webhook for script logs (Still used if enabled)
@@ -71,9 +82,9 @@ local SearchRifts = {
 -- *** Multiplier Filter Toggles (Set true/false) ***
 local SearchMultiplierAny = false
 local SearchMultiplier5x = false
-local SearchMultiplier10x = false
-local SearchMultiplier25x = true
-local SearchMultiplierOrAbove = true
+local SearchMultiplier10x = true -- Example: Search for 10x
+local SearchMultiplier25x = true -- Example: Search for 25x
+local SearchMultiplierOrAbove = true -- Example: Search for 10x OR ABOVE (since 10x is the lowest selected specific)
 
 -- *** Other Settings ***
 local MINIMUM_RIFT_TIME_SECONDS = 120
@@ -291,8 +302,9 @@ logMessage("info", "Initial blacklist size after load attempt: " .. countBlackli
 
 --// Functions (Core Logic)
 
--- Send Rift Found Notification (ONLY sends to AllFindsWebhookURL)
-local function sendRiftNotification(riftData)
+-- Send Rift Found Notification (Sends to AllFinds AND Specific if configured)
+local function sendRiftNotifications(riftData)
+    -- Construct the common payload once
     local pCount = #Players:GetPlayers()
     local maxPlayers = Players.MaxPlayers
     local joinLink = string.format("roblox://experiences/start?placeId=%d&gameInstanceId=%s", PlaceId, CurrentJobId)
@@ -334,10 +346,21 @@ local function sendRiftNotification(riftData)
 
     local payload = { username = "discord.gg/rifthunter", embeds = { embed } }
 
-    -- Send ONLY to "All Finds" Webhook
+    -- 1. Send to All Finds Webhook
     logMessage("info", "Sending notification for " .. title .. " to All Finds webhook...")
     sendWebhookGeneric(AllFindsWebhookURL, payload, "All Finds")
+    task.wait(0.1) -- Small delay between the two sends
+
+    -- 2. Send to Specific Webhook (if applicable)
+    local specificUrl = SpecificRiftWebhooks[riftData.NameLower]
+    if specificUrl then
+        logMessage("info", "Sending notification for " .. title .. " to Specific (" .. riftData.NameLower .. ") webhook...")
+        sendWebhookGeneric(specificUrl, payload, "Specific Rift (" .. riftData.NameLower .. ")")
+    else
+        logMessage("debug", "No specific webhook configured for rift type: " .. riftData.NameLower .. ". Skipping specific notification.")
+    end
 end
+
 
 -- Send Hopping Webhook Notification (Function remains but call is disabled)
 local function sendHopNotification(reason)
