@@ -1,8 +1,8 @@
 --[[
-    Rift Finder Script - AUTO VERSION 1.13
+    Rift Finder Script - AUTO VERSION 1.14
     (Based on Manual V31.1)
 
-    - FIX: Corrected variable name used when formatting time for notifications (`riftData` instead of `foundRiftData`).
+    - FIX: Corrected variable names used within the embed fields (`riftData` instead of `foundRiftData`).
     - REFINED SPECIFIC WEBHOOKS: Rift notifications are ONLY sent if the rift name exists in `SpecificRiftWebhooks`. No default fallback.
     - EMBED UPDATES: Rift found embed author name ("discord.gg/rifthunter"), time field name ("Time Remaining"), and raw join link retained.
     - TIME LOGIC REVERTED: Uses original time finding logic.
@@ -483,6 +483,8 @@ local function findAllTargetRiftsAndNotify() -- Renamed to reflect instant notif
     print("Scanning folder:", islandsFolder:GetFullName())
 
     local anyRiftFound = false -- Flag to track if at least one rift was found
+    local pCount = getServerPlayerCount() -- Get player count once before loop
+    local maxPlayers = Players.MaxPlayers -- Get max players once
 
     for _, island in ipairs(islandsFolder:GetChildren()) do
         if not (island:IsA("Model") or island:IsA("Folder")) then continue end
@@ -621,23 +623,22 @@ local function findAllTargetRiftsAndNotify() -- Renamed to reflect instant notif
                 print(string.format(">>> MATCH VALID: %s | Time: %s (%s s) | H: %s | Multi: %s <<<", riftData.DisplayName, tostring(riftData.TimeLeft), tostring(riftData.TimeSeconds or "??"), tostring(riftData.Height), tostring(riftData.Multiplier)))
 
                 -- *** SEND NOTIFICATION IMMEDIATELY ***
-                local pCount = getServerPlayerCount() -- Get current player count for this specific rift
                 local link = string.format("roblox://experiences/start?placeId=%d&gameInstanceId=%s", PlaceId, CurrentJobId)
                 local serverMsg = "JobId: " .. (CurrentJobId or "??")
                 local title = riftData.DisplayName
                 local imgUrl = RiftImageMapping[riftData.NameLower]
                 local footerText = "discord.gg/rifthunter - the best ever rift finding service"
                 local timeDisplay = tostring(riftData.TimeLeft)
-                local formattedMSS = formatSecondsToMSS(riftData.TimeSeconds)
-                if formattedMSS then timeDisplay = formattedMSS elseif riftData.TimeSeconds then timeDisplay = tostring(riftData.TimeSeconds) .. "s" end
+                local formattedMSS = formatSecondsToMSS(riftData.TimeSeconds) -- Use riftData here
+                if formattedMSS then timeDisplay = formattedMSS elseif riftData.TimeSeconds then timeDisplay = tostring(riftData.TimeSeconds) .. "s" end -- Use riftData here
 
                 local embed = {
                     title = "✅ Rift Found: " .. title, color = 65280, timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
                     fields = {
-                        {name="✨ Multi", value=tostring(riftData.Multiplier), inline=true},
+                        {name="✨ Multi", value=tostring(riftData.Multiplier), inline=true}, -- Use riftData here
                         {name="🕒 Time Remaining", value=timeDisplay, inline=true},
-                        {name="📏 Height", value=tostring(riftData.Height), inline=true},
-                        {name="🧍 Players", value=string.format("%d/%d", pCount, maxPlayers or "?"), inline=true}, -- Use maxPlayers from outer scope if available
+                        {name="📏 Height", value=tostring(riftData.Height), inline=true}, -- Use riftData here
+                        {name="🧍 Players", value=string.format("%d/%d", pCount, maxPlayers or "?"), inline=true}, -- Use pCount from outer scope
                         {name="🆔 Server", value=serverMsg, inline=true},
                         {name="🔗 Join", value=link, inline=false},
                         {name="💡 How to Use", value="Copy and paste the link into your browser", inline=false}
@@ -696,7 +697,7 @@ end
 
 --// Initial Load Actions (No GUI Creation)
 print("------------------------------------------------------")
-print("Rift Finder AUTO V1.10 Loaded") -- Updated Version
+print("Rift Finder AUTO V1.14 Loaded") -- Updated Version
 print(" - Log Destination:", SendLogsToWebhook and "Webhook" or "Console")
 print(" - Attempted to load blacklist from:", BLACKLIST_FILENAME)
 print(" - Blacklist will clear after", MAX_BLACKLIST_SIZE, "entries.")
