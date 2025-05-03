@@ -75,7 +75,7 @@ local SearchRifts = {
 -- 'OrAbove' modifies the specific search: if true, finds rifts with multiplier >= the lowest selected specific multiplier.
 local SearchMultiplierAny = false -- Search for any multiplier (overrides specifics if true)
 local SearchMultiplier5x = false
-local SearchMultiplier10x = false
+local SearchMultiplier10x = true
 local SearchMultiplier25x = true -- Example: Search specifically for 25x (unless Any or OrAbove changes behavior)
 local SearchMultiplierOrAbove = true -- Example: Search for 25x OR ABOVE (since 25x is the lowest selected specific)
 
