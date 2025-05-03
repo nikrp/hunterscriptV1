@@ -1,13 +1,12 @@
 --[[
     Rift Finder Script for Bubble Gum Simulator Infinity (or similar games)
-    AUTO VERSION: V1.5 - Specific Notify Only, Notifier Send Logic, Hop Notify Disabled
+    AUTO VERSION: V1.6 - All + Specific Notify, Notifier Send Logic, Hop Notify Disabled
 
     FEATURES:
     - NO GUI: Configuration is done via boolean variables in the settings below.
-    - AUTO RUN: Executes search, notifies (specific only), and hops automatically upon execution.
-    - SPECIFIC NOTIFY ONLY: Sends webhook notification ONLY to pre-configured specific webhooks for certain rift types.
-    - WEBHOOK SENDING LOGIC: Uses the request/HttpService fallback mechanism.
-    - ALL FINDS WEBHOOK DISABLED: No notifications sent to the general 'AllFindsWebhookURL'.
+    - AUTO RUN: Executes search, notifies (All + Specific), and hops automatically upon execution.
+    - DUAL NOTIFY: Sends webhook notification to BOTH 'AllFindsWebhookURL' AND the specific webhook (if configured) for matching rifts.
+    - WEBHOOK SENDING LOGIC: Uses the request/HttpService fallback mechanism from V1.4.
     - HOP NOTIFICATIONS DISABLED: No webhook sent when hopping servers.
     - ENHANCED DEBUGGING: Retains detailed logging for webhook sending failures.
     - MULTI-FIND: Finds and notifies for ALL matching rifts in a server before hopping.
@@ -18,7 +17,7 @@
     - BLACKLIST: Retains persistent blacklist logic with size limit.
 
     *** USER ACTION REQUIRED: ***
-    1. CONFIGURE WEBHOOKS: Ensure 'SpecificRiftWebhooks' table below has the correct URLs for the rifts you want specific notifications for. Optionally configure 'LogWebhookURL'. ('AllFindsWebhookURL' & 'HopWebhookURL' are ignored for notifications).
+    1. CONFIGURE WEBHOOKS: Fill in 'AllFindsWebhookURL'. Ensure 'SpecificRiftWebhooks' table has correct URLs. Optionally configure 'LogWebhookURL'. ('HopWebhookURL' is ignored).
     2. CONFIGURE SEARCH: Set 'true' or 'false' for each Rift Type and Multiplier Filter.
     3. CONFIGURE LOGGING: Set 'SendLogsToWebhook' to 'true' if you want logs sent there.
     4. EXECUTOR SUPPORT: Blacklist persistence requires executor support for file operations (readfile/writefile/isfile). Adapt BLACKLIST_FILENAME path if needed.
@@ -29,12 +28,12 @@
 --//                          USER CONFIGURATION                            \\
 --//========================================================================\\
 
--- *** Core Webhooks ***
-local AllFindsWebhookURL = "YOUR_ALL_FINDS_URL_HERE" -- *** No longer used for rift notifications ***
+-- *** Core Webhooks (REQUIRED) ***
+local AllFindsWebhookURL = "https://discord.com/api/webhooks/1367753252472619008/T08XZROK0Slu2dxy8575RnGZL8oaj2JxOTqKydQTnvIlsR-O5_iumIMXJbLBbAoBufuI" -- *** All rift notifications go here ***
 local HopWebhookURL = "YOUR_HOP_WEBHOOK_URL_HERE" -- *** No longer used - Hop notifications are disabled ***
 
 -- *** Specific Rift Webhooks (REQUIRED for specific notifications) ***
--- Notifications will ONLY be sent if a rift matches a key in this table.
+-- Notifications will ALSO be sent here if a rift matches a key.
 local SpecificRiftWebhooks = {
     ["rainbow-egg"] = "https://discord.com/api/webhooks/1367744311008956486/KCHFuRYjpHkpHdz2BjfB2zU9o0Tf43PYLH3WE6iwArMBahLd34_sjvRIomDz5Eph95Pv",
     ["void-egg"] = "https://discord.com/api/webhooks/1367744483650703440/6jWdoyLd_M2V8eeCROrxhsmwbcHS3BpNZuDEvrFYn1eW1DLtuwCG2odhXHKVGY5IRr81",
@@ -303,17 +302,9 @@ logMessage("info", "Initial blacklist size after load attempt: " .. countBlackli
 
 --// Functions (Core Logic)
 
--- Send Rift Found Notification (ONLY sends to Specific Webhooks if configured)
-local function sendSpecificRiftNotification(riftData)
-    -- Check if a specific webhook URL exists for this rift type
-    local targetWebhookURL = SpecificRiftWebhooks[riftData.NameLower]
-
-    if not targetWebhookURL then
-        logMessage("debug", "No specific webhook configured for rift type: " .. riftData.NameLower .. ". Skipping notification.")
-        return -- Exit if no specific webhook is set for this type
-    end
-
-    -- Proceed with sending if a specific URL was found
+-- Send Rift Found Notification (Sends to AllFinds AND Specific if configured)
+local function sendRiftNotifications(riftData)
+    -- Construct the common payload once
     local pCount = #Players:GetPlayers()
     local maxPlayers = Players.MaxPlayers
     local joinLink = string.format("roblox://experiences/start?placeId=%d&gameInstanceId=%s", PlaceId, CurrentJobId)
@@ -355,9 +346,19 @@ local function sendSpecificRiftNotification(riftData)
 
     local payload = { username = "discord.gg/rifthunter", embeds = { embed } }
 
-    -- Send ONLY to the Specific Webhook found
-    logMessage("info", "Sending notification for " .. title .. " to Specific (" .. riftData.NameLower .. ") webhook...")
-    sendWebhookGeneric(targetWebhookURL, payload, "Specific Rift (" .. riftData.NameLower .. ")")
+    -- 1. Send to All Finds Webhook
+    logMessage("info", "Sending notification for " .. title .. " to All Finds webhook...")
+    sendWebhookGeneric(AllFindsWebhookURL, payload, "All Finds")
+    task.wait(0.1) -- Small delay between the two sends
+
+    -- 2. Send to Specific Webhook (if applicable)
+    local specificUrl = SpecificRiftWebhooks[riftData.NameLower]
+    if specificUrl then
+        logMessage("info", "Sending notification for " .. title .. " to Specific (" .. riftData.NameLower .. ") webhook...")
+        sendWebhookGeneric(specificUrl, payload, "Specific Rift (" .. riftData.NameLower .. ")")
+    else
+        logMessage("debug", "No specific webhook configured for rift type: " .. riftData.NameLower .. ". Skipping specific notification.")
+    end
 end
 
 
@@ -649,13 +650,13 @@ function startSearchAndHopLogic()
 
     -- Check if any valid rifts were found
     if #foundRiftsList > 0 then
-        logMessage("info", "MATCH(ES) FOUND! Notifying for " .. #foundRiftsList .. " specific rift(s)...")
-        -- Iterate through the found list and send specific notifications
+        logMessage("info", "MATCH(ES) FOUND! Notifying for " .. #foundRiftsList .. " rift(s)...")
+        -- Iterate through the found list and send notifications
         for _, riftData in ipairs(foundRiftsList) do
-            sendSpecificRiftNotification(riftData) -- Call the specific notification function
+            sendRiftNotifications(riftData) -- Call the function that sends to All + Specific
             task.wait(0.5) -- Small delay between notifications if multiple found
         end
-        logMessage("info", "Specific notifications sent (if configured). Hopping server...")
+        logMessage("info", "Notifications sent. Hopping server...")
         attemptHop("Found matching rift(s)") -- Hop because something matched filters
     else
         logMessage("info", "No valid rift found matching filters. Hopping...")
@@ -666,14 +667,14 @@ end
 
 --// Initial Load Actions
 logMessage("info", "------------------------------------------------------")
-logMessage("info", "Rift Finder AUTO Loaded (V1.5 - Specific Notify Only)")
+logMessage("info", "Rift Finder AUTO Loaded (V1.6 - All + Specific Notify)") -- Updated Version Number
 logMessage("info", " - Attempted to load blacklist from: " .. BLACKLIST_FILENAME)
 logMessage("info", " - Blacklist will clear after " .. MAX_BLACKLIST_SIZE .. " entries.")
-logMessage("info", " - Rift Notifications ONLY sent to Specific Webhooks (if configured).")
+logMessage("info", " - Rift Notifications sent to AllFindsWebhookURL AND Specific Webhooks (if configured).") -- Updated Comment
 logMessage("info", " - Hop Notifications DISABLED.")
 logMessage("info", " - Logging to: " .. (SendLogsToWebhook and "Webhook" or "Console"))
 logMessage("info", " - Check console/webhook for search details & webhook errors.")
-logMessage("info", " - Ensure Specific Rift Webhook URLs and Search Toggles are set correctly.")
+logMessage("info", " - Ensure AllFinds & Specific Webhook URLs and Search Toggles are set correctly.") -- Updated Comment
 logMessage("info", " - Blacklist persistence requires executor file functions.")
 logMessage("info", "*** MANUAL RE-EXECUTION AFTER TELEPORT IS REQUIRED! ***")
 logMessage("info", "------------------------------------------------------")
