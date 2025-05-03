@@ -1,8 +1,9 @@
 --[[
-    Rift Finder Script - AUTO VERSION 1.10
+    Rift Finder Script - AUTO VERSION 1.11
     (Based on Manual V31.1)
 
-    - REFINED SPECIFIC WEBHOOKS: Reworked `sendRiftFoundNotification` to more clearly check for and send ONLY to URLs defined in `SpecificRiftWebhooks`. No default fallback.
+    - UPDATED SPECIFIC WEBHOOKS: Changed URLs in `SpecificRiftWebhooks` table as requested.
+    - REFINED SPECIFIC WEBHOOKS: Rift notifications are ONLY sent if the rift name exists in `SpecificRiftWebhooks`. No default fallback.
     - EMBED UPDATES: Rift found embed author name ("discord.gg/rifthunter"), time field name ("Time Remaining"), and raw join link retained.
     - TIME LOGIC REVERTED: Uses original time finding logic.
     - FIND ALL RIFTS: Retained logic to find and notify for *all* matching rifts in a server before hopping.
@@ -39,6 +40,7 @@ local LogWebhookURL = "https://discord.com/api/webhooks/1367736721919315999/afw2
 -- local AllFindsWebhookURL = "..." -- Removed
 
 -- --- Specific Rift Webhooks (Map lowercase rift name to URL - ONLY THESE WILL BE NOTIFIED) ---
+-- *** UPDATED URLS ***
 local SpecificRiftWebhooks = {
     ["rainbow-egg"] = "https://discord.com/api/webhooks/1367744311008956486/KCHFuRYjpHkpHdz2BjfB2zU9o0Tf43PYLH3WE6iwArMBahLd34_sjvRIomDz5Eph95Pv",
     ["void-egg"] = "https://discord.com/api/webhooks/1367744483650703440/6jWdoyLd_M2V8eeCROrxhsmwbcHS3BpNZuDEvrFYn1eW1DLtuwCG2odhXHKVGY5IRr81",
@@ -710,7 +712,7 @@ end
 
 --// Initial Load Actions (No GUI Creation)
 print("------------------------------------------------------")
-print("Rift Finder AUTO V1.9 Loaded") -- Updated Version
+print("Rift Finder AUTO V1.10 Loaded") -- Updated Version
 print(" - Log Destination:", SendLogsToWebhook and "Webhook" or "Console")
 print(" - Attempted to load blacklist from:", BLACKLIST_FILENAME)
 print(" - Blacklist will clear after", MAX_BLACKLIST_SIZE, "entries.")
