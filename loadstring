@@ -1,8 +1,8 @@
 --[[
-    Rift Finder Script - AUTO VERSION 1.24
+    Rift Finder Script - AUTO VERSION 1.23
     (Based on Manual V31.1)
 
-    - FIX: Reordered safety checks in `findTargetRift` to prioritize getting a valid name via pcall before type checking and calling string.lower (also pcalled).
+    - FIX: Implemented highly defensive checks and pcalls around accessing island.Name and calling string.lower within the findTargetRift function to prevent nil errors.
     - FIND FIRST MATCH: Returns only the FIRST valid match found or nil. Notification moved back to main logic.
     - REFINED SPECIFIC WEBHOOKS: Rift notifications are ONLY sent if the rift name exists in `SpecificRiftWebhooks`. No default fallback.
     - EMBED UPDATES: Rift found embed author name ("discord.gg/rifthunter"), time field name ("Time Remaining"), and raw join link retained.
