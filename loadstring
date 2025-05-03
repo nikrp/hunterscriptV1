@@ -1,8 +1,8 @@
 --[[
-    Rift Finder Script - AUTO VERSION 1.16
+    Rift Finder Script - AUTO VERSION 1.17
     (Based on Manual V31.1)
 
-    - REVERTED FIND LOGIC CORE: Restored the original script's method for finding Multiplier, Time, and Height within `findAllTargetRiftsAndNotify` due to persistent errors.
+    - FULLY REVERTED FIND LOGIC: Restored the original script's complete method for finding Multiplier, Time, and Height and applying filters within `findAllTargetRiftsAndNotify`.
     - INSTANT NOTIFICATION: Retained logic to notify immediately when a valid rift is found.
     - REFINED SPECIFIC WEBHOOKS: Rift notifications are ONLY sent if the rift name exists in `SpecificRiftWebhooks`. No default fallback.
     - EMBED UPDATES: Rift found embed author name ("discord.gg/rifthunter"), time field name ("Time Remaining"), and raw join link retained.
@@ -701,7 +701,7 @@ end
 
 --// Initial Load Actions (No GUI Creation)
 print("------------------------------------------------------")
-print("Rift Finder AUTO V1.16 Loaded") -- Updated Version
+print("Rift Finder AUTO V1.17 Loaded") -- Updated Version
 print(" - Log Destination:", SendLogsToWebhook and "Webhook" or "Console")
 print(" - Attempted to load blacklist from:", BLACKLIST_FILENAME)
 print(" - Blacklist will clear after", MAX_BLACKLIST_SIZE, "entries.")
