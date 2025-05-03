@@ -1,15 +1,14 @@
 --[[
     Rift Finder Script for Bubble Gum Simulator Infinity (or similar games)
-    AUTO VERSION: V1.1 - No GUI, Configurable Toggles, All-Finds Webhook ONLY, Multi-Find, Auto Hop
+    AUTO VERSION: V1.2 - Hop Notifications Disabled, Enhanced Webhook Debugging
 
     FEATURES:
     - NO GUI: Configuration is done via boolean variables in the settings below.
     - AUTO RUN: Executes search, notifies, and hops automatically upon execution.
     - SIMPLIFIED WEBHOOKS (Rift Finds):
         - Rift found notifications are ONLY sent to the 'AllFindsWebhookURL'.
-        - General and Specific Rift webhooks are ignored for rift finds.
-        - Hopping Notification Webhook (Separate, Still Active)
-        - Optional Log Webhook (Toggleable, Still Active)
+    - HOP NOTIFICATIONS DISABLED: No webhook sent when hopping servers.
+    - ENHANCED DEBUGGING: More detailed logging for webhook sending failures.
     - MULTI-FIND: Finds and notifies for ALL matching rifts in a server before hopping.
     - CONFIGURABLE FILTERS: Set which rifts and multipliers to search for using 'true'/'false'.
     - REVISED NOTIFICATIONS: Raw join link, updated footer, "How to use" section, specific author name.
@@ -18,7 +17,7 @@
     - BLACKLIST: Retains persistent blacklist logic with size limit.
 
     *** USER ACTION REQUIRED: ***
-    1. CONFIGURE WEBHOOKS: Fill in 'AllFindsWebhookURL' and 'HopWebhookURL'. Optionally configure 'LogWebhookURL'.
+    1. CONFIGURE WEBHOOKS: Fill in 'AllFindsWebhookURL'. Optionally configure 'LogWebhookURL'. ('HopWebhookURL' is ignored).
     2. CONFIGURE SEARCH: Set 'true' or 'false' for each Rift Type and Multiplier Filter.
     3. CONFIGURE LOGGING: Set 'SendLogsToWebhook' to 'true' if you want logs sent there.
     4. EXECUTOR SUPPORT: Blacklist persistence requires executor support for file operations (readfile/writefile/isfile). Adapt BLACKLIST_FILENAME path if needed.
@@ -31,8 +30,8 @@
 
 -- *** Core Webhooks (REQUIRED) ***
 -- local GeneralRiftWebhookURL = "YOUR_OLD_GENERAL_URL_HERE" -- No longer used for rift notifications
-local AllFindsWebhookURL = "https://discord.com/api/webhooks/1367753252472619008/T08XZROK0Slu2dxy8575RnGZL8oaj2JxOTqKydQTnvIlsR-O5_iumIMXJbLBbAoBufuI" -- *** UPDATED URL: Rift notifications ONLY go here ***
-local HopWebhookURL = "https://discord.com/api/webhooks/1367734421846757396/H3Xu33wUAjxHlqIT64qLixxW77RJcwsg02iZaMgDFBZEQpRZt7Ufo-lILBk_nJdyNPfi" -- Webhook for HOPPING notifications (Still used)
+local AllFindsWebhookURL = "https://discord.com/api/webhooks/1367753252472619008/T08XZROK0Slu2dxy8575RnGZL8oaj2JxOTqKydQTnvIlsR-O5_iumIMXJbLBbAoBufuI" -- *** Rift notifications ONLY go here ***
+local HopWebhookURL = "YOUR_HOP_WEBHOOK_URL_HERE" -- *** No longer used - Hop notifications are disabled ***
 
 -- *** Optional Log Webhook ***
 local LogWebhookURL = "https://discord.com/api/webhooks/1367736721919315999/afw2j_udXzS5vCnvZiHaJvYhkxTEOavdNnUrY-bAWlYccbZyuzAqCfE7U9tEB8QszeG9" -- Webhook for script logs (Still used if enabled)
@@ -130,13 +129,6 @@ local RiftImageMapping = {
     ["bubble-rift"] = "https://media.discordapp.net/attachments/839554924940886076/1367387024171991050/80.png?ex=681465e7&is=68131467&hm=f61db8670981a0c446fc97b83ff46c174d86c46c43fa594d17a8f841fbc7d2cf&=&format=webp&quality=lossless"
 }
 local NoMultiplierTypes = {["gift-rift"] = true, ["golden-chest"] = true, ["royal-chest"] = true, ["bubble-rift"] = true}
---[[ -- Specific webhooks no longer used for rift notifications
-local SpecificRiftWebhooks = {
-    ["rainbow-egg"] = "...",
-    ["void-egg"] = "...",
-    -- etc.
-}
-]]--
 
 local RENDERED_FOLDER_NAME = "Rendered"
 local TARGET_RIFTS_FOLDER_NAME = "Rifts"
@@ -244,13 +236,64 @@ logMessage("info", "Initial blacklist size after load attempt: " .. countBlackli
 
 --// Functions
 
--- Send Webhook Message Generic Function
+-- Send Webhook Message Generic Function (Enhanced Debugging)
 local function sendWebhookGeneric(targetWebhookURL, payloadData, webhookPurpose)
     if not targetWebhookURL or string.len(targetWebhookURL) < 20 then logMessage("warn", webhookPurpose .. " Webhook URL invalid or not set."); return false end
-    local encodeSuccess, encodedPayload = pcall(HttpService.JSONEncode, HttpService, payloadData); if not encodeSuccess then logMessage("warn", "JSONEncode failed for " .. webhookPurpose .. " webhook: " .. tostring(encodedPayload)); return false end
-    local success, response = false, "No request attempt"; if request and type(request) == "function" then logMessage("info", "Attempting " .. webhookPurpose .. " webhook via 'request'..."); success, response = pcall(request, { Url = targetWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload }); if success then logMessage("info", webhookPurpose .. " Webhook possibly sent via 'request'."); return true else logMessage("warn", webhookPurpose .. " 'request' failed: " .. tostring(response)) end else logMessage("info", "'request' not found/usable for " .. webhookPurpose .. ".") end
-    logMessage("info", "Falling back to HttpService for " .. webhookPurpose .. " webhook..."); success, response = pcall(HttpService.RequestAsync, HttpService, { Url = targetWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload }); if not success then logMessage("warn", "HttpService " .. webhookPurpose .. " webhook failed (Likely blocked): " .. tostring(response)); return false else logMessage("info", webhookPurpose .. " Webhook sent via HttpService."); return true end
+
+    local encodeSuccess, encodedPayload = pcall(HttpService.JSONEncode, HttpService, payloadData)
+    if not encodeSuccess then logMessage("warn", "JSONEncode failed for " .. webhookPurpose .. " webhook: " .. tostring(encodedPayload)); return false end
+
+    local success, response = false, "No request attempt"
+    local responseBody = ""
+
+    -- Try 'request' first
+    if request and type(request) == "function" then
+        logMessage("info", "Attempting " .. webhookPurpose .. " webhook via 'request'...")
+        success, response = pcall(request, { Url = targetWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
+        if success then
+            logMessage("info", webhookPurpose .. " Webhook possibly sent via 'request'.")
+            -- Even on success, check response if possible (some executors might return status codes)
+            if type(response) == "table" and response.StatusCode then
+                 logMessage("debug", webhookPurpose .. " 'request' response status: " .. tostring(response.StatusCode))
+                 if response.Body then responseBody = response.Body end
+            end
+            return true -- Assume success if pcall didn't error
+        else
+            -- Log detailed error from 'request'
+            logMessage("warn", webhookPurpose .. " 'request' pcall failed! Error: " .. tostring(response))
+            -- Try to get more info if response was a table even on failure
+             if type(response) == "table" and response.Body then responseBody = response.Body end
+             logMessage("warn", webhookPurpose .. " 'request' response body on failure (if available): " .. responseBody)
+        end
+    else
+        logMessage("info", "'request' not found/usable for " .. webhookPurpose .. ".")
+    end
+
+    -- Fallback to HttpService
+    logMessage("info", "Falling back to HttpService for " .. webhookPurpose .. " webhook...")
+    success, response = pcall(HttpService.RequestAsync, HttpService, { Url = targetWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
+    if not success then
+        -- Log detailed error from HttpService
+        logMessage("warn", "HttpService " .. webhookPurpose .. " webhook pcall failed! Error: " .. tostring(response))
+        -- Try to get response details if available (might be part of the error string)
+        logMessage("warn", webhookPurpose .. " HttpService failure details (if any in error): " .. tostring(response))
+        return false
+    else
+        logMessage("info", webhookPurpose .. " Webhook sent via HttpService.")
+        -- Log response details from HttpService
+        if type(response) == "table" then
+            logMessage("debug", webhookPurpose .. " HttpService response status: " .. tostring(response.StatusCode))
+            logMessage("debug", webhookPurpose .. " HttpService response body: " .. tostring(response.Body))
+            if not response.Success then
+                 logMessage("warn", webhookPurpose .. " HttpService response indicates failure! Status: " .. response.StatusCode .. " | Message: " .. response.StatusMessage)
+            end
+        else
+             logMessage("warn", webhookPurpose .. " HttpService returned unexpected response type: " .. type(response))
+        end
+        return true
+    end
 end
+
 
 -- Send Rift Found Notification (ONLY sends to AllFindsWebhookURL)
 local function sendRiftNotification(riftData)
@@ -295,26 +338,14 @@ local function sendRiftNotification(riftData)
 
     local payload = { username = "discord.gg/rifthunter", embeds = { embed } }
 
-    --[[ -- 1. Send to General Webhook - DISABLED
-    logMessage("info", "Sending notification for " .. title .. " to General webhook...")
-    sendWebhookGeneric(GeneralRiftWebhookURL, payload, "General Rift")
-    ]]--
-
-    -- 2. Send to "All Finds" Webhook - NOW THE ONLY TARGET
+    -- Send ONLY to "All Finds" Webhook
     logMessage("info", "Sending notification for " .. title .. " to All Finds webhook...")
     sendWebhookGeneric(AllFindsWebhookURL, payload, "All Finds")
-
-    --[[ -- 3. Send to Specific Webhook (if applicable) - DISABLED
-    local specificUrl = SpecificRiftWebhooks[riftData.NameLower]
-    if specificUrl then
-        logMessage("info", "Sending notification for " .. title .. " to Specific (" .. riftData.NameLower .. ") webhook...")
-        sendWebhookGeneric(specificUrl, payload, "Specific Rift (" .. riftData.NameLower .. ")")
-    end
-    ]]--
 end
 
--- Send Hopping Webhook Notification (Still Active)
+-- Send Hopping Webhook Notification (Function remains but call is disabled)
 local function sendHopNotification(reason)
+    --[[ -- DISABLED: Hop notifications are turned off
     local playerName = Player and Player.DisplayName or "UnknownPlayer"
     local embed = {
         title = "✈️ Hopping Servers",
@@ -325,6 +356,8 @@ local function sendHopNotification(reason)
     }
     local payloadData = { username = "Rift Finder Status", embeds = { embed } }
     sendWebhookGeneric(HopWebhookURL, payloadData, "Hopping")
+    ]]--
+    logMessage("info", "Hop notification sending is disabled.") -- Add log message indicating it's disabled
 end
 
 -- Get Server List (Executor Dependent)
@@ -341,7 +374,7 @@ local function getServers()
         local processPage = true
 
         if not success or not response or type(response) ~= "table" or not response.Body then
-            logMessage("warn", string.format("Failed to fetch server list via 'request' on attempt %d. Success: %s", attempts, tostring(success)))
+            logMessage("warn", string.format("Failed to fetch server list via 'request' on attempt %d. Success: %s | Response: %s", attempts, tostring(success), tostring(response)))
             processPage = false
         elseif type(response.Body) ~= "string" then
              logMessage("warn", string.format("Invalid response body type on page %d: %s. Expected string.", attempts, type(response.Body)))
@@ -376,10 +409,11 @@ local function getServers()
     logMessage("info", "Finished fetching servers. Total found: " .. #servers); return servers
 end
 
--- Attempt Teleport (Uses Blacklist, Saves Blacklist Before Hop, Clears Blacklist at Limit)
+-- Attempt Teleport (Hop Notification Call Disabled)
 local function attemptHop(reason)
-    sendHopNotification(reason) -- Still sends hop notification
-    task.wait(1)
+    -- sendHopNotification(reason) -- <<< THIS CALL IS NOW DISABLED
+    logMessage("info", "Attempting hop. Reason: " .. reason .. " (Hop notification disabled)") -- Log reason locally
+    task.wait(0.1) -- Reduced wait slightly as no webhook needs sending
 
     local serverList = getServers()
     local targetServerId = nil
@@ -616,12 +650,13 @@ end
 
 --// Initial Load Actions
 logMessage("info", "------------------------------------------------------")
-logMessage("info", "Rift Finder AUTO Loaded (V1.1 - All Finds Only)")
+logMessage("info", "Rift Finder AUTO Loaded (V1.2 - Hop Notify Disabled + Debug)")
 logMessage("info", " - Attempted to load blacklist from: " .. BLACKLIST_FILENAME)
 logMessage("info", " - Blacklist will clear after " .. MAX_BLACKLIST_SIZE .. " entries.")
 logMessage("info", " - Rift Notifications ONLY sent to AllFindsWebhookURL.")
+logMessage("info", " - Hop Notifications DISABLED.")
 logMessage("info", " - Logging to: " .. (SendLogsToWebhook and "Webhook" or "Console"))
-logMessage("info", " - Check console/webhook for search details.")
+logMessage("info", " - Check console/webhook for search details & webhook errors.")
 logMessage("info", " - Ensure Webhook URLs and Search Toggles are set correctly.")
 logMessage("info", " - Blacklist persistence requires executor file functions.")
 logMessage("info", "*** MANUAL RE-EXECUTION AFTER TELEPORT IS REQUIRED! ***")
