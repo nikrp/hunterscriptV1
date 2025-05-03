@@ -1,9 +1,8 @@
 --[[
-    Rift Finder Script - AUTO VERSION 1.23
+    Rift Finder Script - AUTO VERSION 1.25
     (Based on Manual V31.1)
 
-    - FIX: Implemented highly defensive checks and pcalls around accessing island.Name and calling string.lower within the findTargetRift function to prevent nil errors.
-    - FIND FIRST MATCH: Returns only the FIRST valid match found or nil. Notification moved back to main logic.
+    - FIND LOGIC FULLY REVERTED: Restored the original script's complete method for finding Multiplier, Time, and Height within `findTargetRift`. Function returns only the FIRST valid match or nil.
     - REFINED SPECIFIC WEBHOOKS: Rift notifications are ONLY sent if the rift name exists in `SpecificRiftWebhooks`. No default fallback.
     - EMBED UPDATES: Rift found embed author name ("discord.gg/rifthunter"), time field name ("Time Remaining"), and raw join link retained.
     - LOGGING TOGGLE: Retained `SendLogsToWebhook` setting (defaulting to console).
@@ -15,7 +14,6 @@
     - PERSISTENT BLACKLIST ATTEMPT: Retained functions to load/save the blacklist.
                                      *** USER ACTION REQUIRED: Replace placeholder function names and
                                          potentially the filename/path with ones specific to your executor! ***
-    - FIND LOGIC: Uses original detail-finding methods.
     - Blacklisting: Uses `_G.visitedServers`.
     - NOTE: Webhook/Server List fetching depends heavily on executor's `request` function. Sending cannot be guaranteed if blocked.
     - You MUST MANUALLY RE-EXECUTE the script for each cycle.
@@ -611,7 +609,7 @@ end
 
 --// Initial Load Actions (No GUI Creation)
 print("------------------------------------------------------")
-print("Rift Finder AUTO V1.24 Loaded") -- Updated Version
+print("Rift Finder AUTO V1.25 Loaded") -- Updated Version
 print(" - Log Destination:", SendLogsToWebhook and "Webhook" or "Console")
 print(" - Attempted to load blacklist from:", BLACKLIST_FILENAME)
 print(" - Blacklist will clear after", MAX_BLACKLIST_SIZE, "entries.")
