@@ -1,16 +1,15 @@
 --[[
     Rift Finder Script for Bubble Gum Simulator Infinity (or similar games)
-    AUTO VERSION: V1.0 - No GUI, Configurable Toggles, Multi-Webhook, Multi-Find, Auto Hop
+    AUTO VERSION: V1.1 - No GUI, Configurable Toggles, All-Finds Webhook ONLY, Multi-Find, Auto Hop
 
     FEATURES:
     - NO GUI: Configuration is done via boolean variables in the settings below.
     - AUTO RUN: Executes search, notifies, and hops automatically upon execution.
-    - MULTI-WEBHOOK:
-        - General Rift Found Webhook (Configurable)
-        - Specific Rift Webhooks (Hardcoded for certain rare types)
-        - "All Finds" Webhook (Sends every valid find)
-        - Hopping Notification Webhook (Separate)
-        - Optional Log Webhook (Toggleable)
+    - SIMPLIFIED WEBHOOKS (Rift Finds):
+        - Rift found notifications are ONLY sent to the 'AllFindsWebhookURL'.
+        - General and Specific Rift webhooks are ignored for rift finds.
+        - Hopping Notification Webhook (Separate, Still Active)
+        - Optional Log Webhook (Toggleable, Still Active)
     - MULTI-FIND: Finds and notifies for ALL matching rifts in a server before hopping.
     - CONFIGURABLE FILTERS: Set which rifts and multipliers to search for using 'true'/'false'.
     - REVISED NOTIFICATIONS: Raw join link, updated footer, "How to use" section, specific author name.
@@ -19,7 +18,7 @@
     - BLACKLIST: Retains persistent blacklist logic with size limit.
 
     *** USER ACTION REQUIRED: ***
-    1. CONFIGURE WEBHOOKS: Fill in ALL webhook URLs below.
+    1. CONFIGURE WEBHOOKS: Fill in 'AllFindsWebhookURL' and 'HopWebhookURL'. Optionally configure 'LogWebhookURL'.
     2. CONFIGURE SEARCH: Set 'true' or 'false' for each Rift Type and Multiplier Filter.
     3. CONFIGURE LOGGING: Set 'SendLogsToWebhook' to 'true' if you want logs sent there.
     4. EXECUTOR SUPPORT: Blacklist persistence requires executor support for file operations (readfile/writefile/isfile). Adapt BLACKLIST_FILENAME path if needed.
@@ -31,12 +30,12 @@
 --//========================================================================\\
 
 -- *** Core Webhooks (REQUIRED) ***
-local GeneralRiftWebhookURL = "https://discord.com/api/webhooks/1365884302684065943/xEFryRlllaI3-geqOI1VAI4rRrEg1S7O11aEnUBslfHagPaOhJv_N5Ka_rIEp4FsJbWj" -- Webhook for MOST rift finds
-local AllFindsWebhookURL = "https://discord.com/api/webhooks/1367753252472619008/T08XZROK0Slu2dxy8575RnGZL8oaj2JxOTqKydQTnvIlsR-O5_iumIMXJbLBbAoBufuI" -- Webhook where EVERY SINGLE find is sent
-local HopWebhookURL = "https://discord.com/api/webhooks/1367734421846757396/H3Xu33wUAjxHlqIT64qLixxW77RJcwsg02iZaMgDFBZEQpRZt7Ufo-lILBk_nJdyNPfi" -- Webhook for HOPPING notifications
+-- local GeneralRiftWebhookURL = "YOUR_OLD_GENERAL_URL_HERE" -- No longer used for rift notifications
+local AllFindsWebhookURL = "https://discord.com/api/webhooks/1367753252472619008/T08XZROK0Slu2dxy8575RnGZL8oaj2JxOTqKydQTnvIlsR-O5_iumIMXJbLBbAoBufuI" -- *** UPDATED URL: Rift notifications ONLY go here ***
+local HopWebhookURL = "https://discord.com/api/webhooks/1367734421846757396/H3Xu33wUAjxHlqIT64qLixxW77RJcwsg02iZaMgDFBZEQpRZt7Ufo-lILBk_nJdyNPfi" -- Webhook for HOPPING notifications (Still used)
 
 -- *** Optional Log Webhook ***
-local LogWebhookURL = "https://discord.com/api/webhooks/1367736721919315999/afw2j_udXzS5vCnvZiHaJvYhkxTEOavdNnUrY-bAWlYccbZyuzAqCfE7U9tEB8QszeG9" -- Webhook for script logs (e.g., starting search, hopping reason)
+local LogWebhookURL = "https://discord.com/api/webhooks/1367736721919315999/afw2j_udXzS5vCnvZiHaJvYhkxTEOavdNnUrY-bAWlYccbZyuzAqCfE7U9tEB8QszeG9" -- Webhook for script logs (Still used if enabled)
 local SendLogsToWebhook = false -- Set to 'true' to send logs to LogWebhookURL, 'false' to print to console only.
 
 -- *** Blacklist Settings ***
@@ -75,7 +74,7 @@ local SearchRifts = {
 -- 'OrAbove' modifies the specific search: if true, finds rifts with multiplier >= the lowest selected specific multiplier.
 local SearchMultiplierAny = false -- Search for any multiplier (overrides specifics if true)
 local SearchMultiplier5x = false
-local SearchMultiplier10x = true
+local SearchMultiplier10x = false
 local SearchMultiplier25x = true -- Example: Search specifically for 25x (unless Any or OrAbove changes behavior)
 local SearchMultiplierOrAbove = true -- Example: Search for 25x OR ABOVE (since 25x is the lowest selected specific)
 
@@ -90,7 +89,7 @@ local MINIMUM_RIFT_TIME_SECONDS = 120 -- Rifts with less time remaining than thi
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
-local CoreGui = game:GetService("CoreGui") -- Still needed for potential cleanup? Maybe not.
+local CoreGui = game:GetService("CoreGui")
 local RunService = game:GetService("RunService")
 
 --// Variables
@@ -131,24 +130,22 @@ local RiftImageMapping = {
     ["bubble-rift"] = "https://media.discordapp.net/attachments/839554924940886076/1367387024171991050/80.png?ex=681465e7&is=68131467&hm=f61db8670981a0c446fc97b83ff46c174d86c46c43fa594d17a8f841fbc7d2cf&=&format=webp&quality=lossless"
 }
 local NoMultiplierTypes = {["gift-rift"] = true, ["golden-chest"] = true, ["royal-chest"] = true, ["bubble-rift"] = true}
+--[[ -- Specific webhooks no longer used for rift notifications
 local SpecificRiftWebhooks = {
-    ["rainbow-egg"] = "https://discord.com/api/webhooks/1367744311008956486/KCHFuRYjpHkpHdz2BjfB2zU9o0Tf43PYLH3WE6iwArMBahLd34_sjvRIomDz5Eph95Pv",
-    ["void-egg"] = "https://discord.com/api/webhooks/1367744483650703440/6jWdoyLd_M2V8eeCROrxhsmwbcHS3BpNZuDEvrFYn1eW1DLtuwCG2odhXHKVGY5IRr81",
-    ["nightmare-egg"] = "https://discord.com/api/webhooks/1367744623904292924/rNja_qhRgIP_YP-LARSwWZksoImL81HjDd-_HWvX5IIDFv1cQzl5GF4FsyckBsmps22k",
-    ["royal-chest"] = "https://discord.com/api/webhooks/1367744720725479494/0phV2HWkXp8Qjbjvmo7MtpOKjPV2rhD-VN2Vl0t5UfoKRRSOCb6wIWIDYGNjRvzAn8c5",
-    ["golden-chest"] = "https://discord.com/api/webhooks/1367744837801087007/-V26OqXY8rhWab_gbTh0W9t3JXXOoL4kh98dPBdaUZUM3XIzECUPNFG9SHerANC-PHqL",
-    ["bubble-rift"] = "https://discord.com/api/webhooks/1367751727809560626/HxjDXhbzkFtn2kvlP-svqAxx2Fp2DBXEP6uDb8RFekTAhDD1hElxWlrvcl0kprEvrNzg", -- 250x bubble
-    ["silly-egg"] = "https://discord.com/api/webhooks/1367751821220777984/BvcLy8ObGDt6b22Ap4E8y6_znd22gh2ilAh8nt0Y6BH0K6RgyGzePLjqN5g44bZnJqwK"
+    ["rainbow-egg"] = "...",
+    ["void-egg"] = "...",
+    -- etc.
 }
+]]--
 
 local RENDERED_FOLDER_NAME = "Rendered"
 local TARGET_RIFTS_FOLDER_NAME = "Rifts"
 local WAIT_FOR_FOLDERS_TIMEOUT = 15
-local PotentialTimeNames = {"Time", "time", "Timer", "timer", "Duration", "duration"} -- Used for Value/Attribute fallback
+local PotentialTimeNames = {"Time", "time", "Timer", "timer", "Duration", "duration"}
 local PotentialMultiplierNames = {"Multiplier", "multiplier", "Multi", "multi", "X", "Bonus", "bonus"}
 local PotentialHeightNames = {"Height", "height", "Y", "y", "Altitude", "altitude"}
 local PotentialHeightParts = {"EggPlatformSpawn", "Sign", "Base", "Platform", "Handle"}
-local SERVER_FETCH_DELAY = 2 -- Seconds between fetching server list pages
+local SERVER_FETCH_DELAY = 2
 
 --// Server Blacklist Setup & Persistence Functions
 _G.visitedServers = _G.visitedServers or {}
@@ -166,12 +163,11 @@ local function logMessage(level, message)
     local fullMessage = prefix .. message
 
     if SendLogsToWebhook and LogWebhookURL and string.len(LogWebhookURL) > 20 then
-        -- Try sending to webhook
         local payloadData = { content = "```\n" .. fullMessage .. "\n```", username = "Rift Finder Logs" }
         local encodeSuccess, encodedPayload = pcall(HttpService.JSONEncode, HttpService, payloadData)
         if not encodeSuccess then
             print(prefix .. "WARN: JSONEncode failed for log webhook: " .. tostring(encodedPayload))
-            print(fullMessage) -- Fallback to console print
+            print(fullMessage)
             return
         end
 
@@ -180,29 +176,22 @@ local function logMessage(level, message)
             success, response = pcall(request, { Url = LogWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
             if not success then
                  print(prefix .. "WARN: 'request' failed for log webhook: " .. tostring(response))
-                 print(fullMessage) -- Fallback to console print
+                 print(fullMessage)
             end
         else
-            -- Fallback to HttpService if 'request' is not available
              success, response = pcall(HttpService.RequestAsync, HttpService, { Url = LogWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload })
              if not success then
                  print(prefix .. "WARN: HttpService log webhook failed (Likely blocked): " .. tostring(response))
-                 print(fullMessage) -- Fallback to console print
+                 print(fullMessage)
              end
         end
     else
-        -- Default: Print to console
-        if level == "warn" or level == "error" then
-            warn(fullMessage)
-        else
-            print(fullMessage)
-        end
+        if level == "warn" or level == "error" then warn(fullMessage) else print(fullMessage) end
     end
 end
 
 
 local function loadBlacklist()
-    -- Use logMessage for output
     if isfile and readfile and isfile(BLACKLIST_FILENAME) then
         logMessage("info", "Attempting to load blacklist from: " .. BLACKLIST_FILENAME)
         local success, fileContent = pcall(readfile, BLACKLIST_FILENAME)
@@ -245,8 +234,6 @@ local function saveBlacklist()
         else
             logMessage("warn", "Failed to JSONEncode blacklist for saving: " .. (encodeSuccess and "Encode OK but nil content?" or tostring(jsonContent)))
         end
-    else
-        -- Don't warn every time if unsupported, loadBlacklist already warned.
     end
 end
 
@@ -265,7 +252,7 @@ local function sendWebhookGeneric(targetWebhookURL, payloadData, webhookPurpose)
     logMessage("info", "Falling back to HttpService for " .. webhookPurpose .. " webhook..."); success, response = pcall(HttpService.RequestAsync, HttpService, { Url = targetWebhookURL, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = encodedPayload }); if not success then logMessage("warn", "HttpService " .. webhookPurpose .. " webhook failed (Likely blocked): " .. tostring(response)); return false else logMessage("info", webhookPurpose .. " Webhook sent via HttpService."); return true end
 end
 
--- Send Rift Found Notification (Handles General, Specific, and All Finds)
+-- Send Rift Found Notification (ONLY sends to AllFindsWebhookURL)
 local function sendRiftNotification(riftData)
     local pCount = #Players:GetPlayers()
     local maxPlayers = Players.MaxPlayers
@@ -285,7 +272,7 @@ local function sendRiftNotification(riftData)
         else
             timeString = string.format("%d sec", riftData.TimeSeconds)
         end
-    elseif type(riftData.TimeLeft) == "string" then -- Fallback if only raw string found
+    elseif type(riftData.TimeLeft) == "string" then
         timeString = riftData.TimeLeft
     end
 
@@ -295,51 +282,48 @@ local function sendRiftNotification(riftData)
         timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
         fields = {
             {name="✨ Multi", value=tostring(riftData.Multiplier), inline=true},
-            {name="🕒 Time Remaining", value=timeString, inline=true}, -- Updated name and format
+            {name="🕒 Time Remaining", value=timeString, inline=true},
             {name="📏 Height", value=tostring(riftData.Height), inline=true},
             {name="🧍 Players", value=string.format("%d/%d", pCount, maxPlayers), inline=true},
             {name="🆔 Server", value=serverMsg, inline=true},
-            {name="🔗 Join", value=joinLink, inline=false}, -- Raw link
-            {name="❓ How to use", value="Copy and paste the link above into your browser's address bar.", inline=false} -- How-to section
+            {name="🔗 Join", value=joinLink, inline=false},
+            {name="❓ How to use", value="Copy and paste the link above into your browser's address bar.", inline=false}
         },
         footer = { text = footerText }
     }
     if imgUrl and imgUrl ~= "PASTE_URL_HERE" and string.find(imgUrl, "https://") then embed.thumbnail = { url = imgUrl }; logMessage("debug", " - Added thumbnail for " .. title) else logMessage("debug", " - No valid thumbnail for " .. title) end
 
-    local payload = { username = "discord.gg/rifthunter", embeds = { embed } } -- Set author name
+    local payload = { username = "discord.gg/rifthunter", embeds = { embed } }
 
-    -- 1. Send to General Webhook
+    --[[ -- 1. Send to General Webhook - DISABLED
     logMessage("info", "Sending notification for " .. title .. " to General webhook...")
     sendWebhookGeneric(GeneralRiftWebhookURL, payload, "General Rift")
+    ]]--
 
-    -- 2. Send to "All Finds" Webhook
+    -- 2. Send to "All Finds" Webhook - NOW THE ONLY TARGET
     logMessage("info", "Sending notification for " .. title .. " to All Finds webhook...")
     sendWebhookGeneric(AllFindsWebhookURL, payload, "All Finds")
 
-    -- 3. Send to Specific Webhook (if applicable)
+    --[[ -- 3. Send to Specific Webhook (if applicable) - DISABLED
     local specificUrl = SpecificRiftWebhooks[riftData.NameLower]
     if specificUrl then
         logMessage("info", "Sending notification for " .. title .. " to Specific (" .. riftData.NameLower .. ") webhook...")
         sendWebhookGeneric(specificUrl, payload, "Specific Rift (" .. riftData.NameLower .. ")")
     end
+    ]]--
 end
 
--- Send Hopping Webhook Notification
+-- Send Hopping Webhook Notification (Still Active)
 local function sendHopNotification(reason)
     local playerName = Player and Player.DisplayName or "UnknownPlayer"
     local embed = {
         title = "✈️ Hopping Servers",
         description = string.format("Bot (%s) initiated hop.", playerName),
-        color = 16776960, -- Yellow/Orange color
-        fields = {
-            {name = "Reason", value = reason or "No reason specified", inline = false}
-        },
+        color = 16776960,
+        fields = { {name = "Reason", value = reason or "No reason specified", inline = false} },
         timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
     }
-    local payloadData = {
-        username = "Rift Finder Status",
-        embeds = { embed }
-    }
+    local payloadData = { username = "Rift Finder Status", embeds = { embed } }
     sendWebhookGeneric(HopWebhookURL, payloadData, "Hopping")
 end
 
@@ -394,7 +378,7 @@ end
 
 -- Attempt Teleport (Uses Blacklist, Saves Blacklist Before Hop, Clears Blacklist at Limit)
 local function attemptHop(reason)
-    sendHopNotification(reason)
+    sendHopNotification(reason) -- Still sends hop notification
     task.wait(1)
 
     local serverList = getServers()
@@ -486,46 +470,16 @@ end
 local function parseTime(timeText)
     if not timeText or type(timeText) ~= "string" then return nil end
     local totalSeconds = 0
-
-    -- Try MM:SS format
     local min, sec = string.match(timeText, "^(%d+):(%d+)$")
-    if min and sec then
-        totalSeconds = tonumber(min) * 60 + tonumber(sec)
-        logMessage("debug", "Parsed time '" .. timeText .. "' as MM:SS -> " .. totalSeconds .. "s")
-        return totalSeconds
-    end
-
-    -- Try "X minutes Y seconds" format
+    if min and sec then totalSeconds = tonumber(min) * 60 + tonumber(sec); logMessage("debug", "Parsed time '" .. timeText .. "' as MM:SS -> " .. totalSeconds .. "s"); return totalSeconds end
     local minutes, seconds = string.match(timeText, "(%d+) ?minutes? ?(%d*) ?sec?")
-    if minutes then
-        totalSeconds = tonumber(minutes) * 60 + (tonumber(seconds) or 0)
-        logMessage("debug", "Parsed time '" .. timeText .. "' as 'X min Y sec' -> " .. totalSeconds .. "s")
-        return totalSeconds
-    end
-
-     -- Try "X minutes" format
+    if minutes then totalSeconds = tonumber(minutes) * 60 + (tonumber(seconds) or 0); logMessage("debug", "Parsed time '" .. timeText .. "' as 'X min Y sec' -> " .. totalSeconds .. "s"); return totalSeconds end
     minutes = string.match(timeText, "(%d+) ?minutes?")
-    if minutes then
-        totalSeconds = tonumber(minutes) * 60
-        logMessage("debug", "Parsed time '" .. timeText .. "' as 'X min' -> " .. totalSeconds .. "s")
-        return totalSeconds
-    end
-
-    -- Try "X sec" format
+    if minutes then totalSeconds = tonumber(minutes) * 60; logMessage("debug", "Parsed time '" .. timeText .. "' as 'X min' -> " .. totalSeconds .. "s"); return totalSeconds end
     local secondsOnly = string.match(timeText, "(%d+) ?sec")
-    if secondsOnly then
-        totalSeconds = tonumber(secondsOnly)
-        logMessage("debug", "Parsed time '" .. timeText .. "' as 'X sec' -> " .. totalSeconds .. "s")
-        return totalSeconds
-    end
-
-    -- Fallback: Try parsing just numbers (less reliable for time)
+    if secondsOnly then totalSeconds = tonumber(secondsOnly); logMessage("debug", "Parsed time '" .. timeText .. "' as 'X sec' -> " .. totalSeconds .. "s"); return totalSeconds end
     local numOnly = tonumber(timeText)
-    if numOnly then
-        logMessage("debug", "Parsed time '" .. timeText .. "' as raw number -> " .. numOnly .. "s (Assuming seconds)")
-        return numOnly -- Assume it's seconds if just a number
-    end
-
+    if numOnly then logMessage("debug", "Parsed time '" .. timeText .. "' as raw number -> " .. numOnly .. "s (Assuming seconds)"); return numOnly end
     logMessage("debug", "Could not parse time string: " .. timeText)
     return nil
 end
@@ -541,7 +495,7 @@ local function findTargetRifts()
     local islandsFolder = renderedFolder:WaitForChild(TARGET_RIFTS_FOLDER_NAME, WAIT_FOR_FOLDERS_TIMEOUT); if not islandsFolder then logMessage("error", "'"..TARGET_RIFTS_FOLDER_NAME.."' folder not found."); return {} end
     logMessage("info", "Scanning folder: " .. islandsFolder:GetFullName())
 
-    local foundRiftsList = {} -- Initialize list to store multiple finds
+    local foundRiftsList = {}
 
     for _, island in ipairs(islandsFolder:GetChildren()) do
         if not (island:IsA("Model") or island:IsA("Folder")) then continue end
@@ -549,27 +503,26 @@ local function findTargetRifts()
         local islandName = island.Name
         local islandNameLower = string.lower(islandName)
 
-        -- Check if this rift type is enabled in settings
         if SearchRifts[islandNameLower] then
             logMessage("debug", "Potential match found: " .. islandName .. " (Enabled in settings)")
             local displayName = RiftDisplayNameMapping[islandNameLower] or islandName
             local riftData = { Name = islandName, NameLower = islandNameLower, DisplayName = displayName, TimeLeft = "Unknown", TimeSeconds = nil, Height = "Unknown", Position = "Unknown", Multiplier = "Unknown", MultiplierValue = nil, Instance = island }
             local foundMultiplier, foundTime, foundHeight = false, false, false
             local passedMultiplierFilter = false
-            local passedTimeFilter = true -- Assume passes unless proven otherwise
+            local passedTimeFilter = true
 
             -- Determine Multiplier
             if NoMultiplierTypes[islandNameLower] then
                 logMessage("debug", "  - Type has no multiplier. Setting to N/A.")
                 riftData.Multiplier = "N/A"; riftData.MultiplierValue = nil; foundMultiplier = true
-                passedMultiplierFilter = true -- Always passes if N/A
+                passedMultiplierFilter = true
             else
                 -- Find Multiplier (Value/Attribute/TextLabel)
                 for _, pName in ipairs(PotentialMultiplierNames) do local obj=island:FindFirstChild(pName,true); if obj and obj:IsA("ValueBase") then local v=obj.Value; if type(v)=="number" then riftData.Multiplier=tostring(v).."x"; riftData.MultiplierValue=v; foundMultiplier=true; logMessage("debug", "  - Found Multi via Value: "..riftData.Multiplier); break elseif type(v)=="string" and v:match("^[%d%.]+x?$") then riftData.Multiplier=v; if not v:find("x",1,true) then riftData.Multiplier=v.."x" end; riftData.MultiplierValue=parseMultiplier(v); foundMultiplier=true; logMessage("debug", "  - Found Multi via StringValue: "..riftData.Multiplier); break end end end
                 if not foundMultiplier then for _, pName in ipairs(PotentialMultiplierNames) do local att=island:GetAttribute(pName); if att then if type(att)=="number" then riftData.Multiplier=tostring(att).."x"; riftData.MultiplierValue=att; foundMultiplier=true; logMessage("debug", "  - Found Multi via Attribute: "..riftData.Multiplier); break elseif type(att)=="string" and att:match("^[%d%.]+x?$") then riftData.Multiplier=att; if not att:find("x",1,true) then riftData.Multiplier=att.."x" end; riftData.MultiplierValue=parseMultiplier(att); foundMultiplier=true; logMessage("debug", "  - Found Multi via String Attribute: "..riftData.Multiplier); break end end end end
                 if not foundMultiplier then for _, d in ipairs(island:GetDescendants()) do if d:IsA("TextLabel") then local txt=d.Text or ""; local lt=string.lower(txt); if lt:match("x%d") or lt:match("%dx") then riftData.Multiplier=txt; riftData.MultiplierValue=parseMultiplier(txt); foundMultiplier=true; logMessage("debug", "  - Found potential Multi via GUI Text: "..riftData.Multiplier); break end end end end
 
-                -- Apply Multiplier Filter (Handles "Or Above")
+                -- Apply Multiplier Filter
                 if not foundMultiplier then
                     logMessage("debug", "  - Could not find Multiplier.")
                     if SearchMultiplierAny then logMessage("debug", "  - Filter: Processing anyway (Any)."); passedMultiplierFilter = true
@@ -577,26 +530,19 @@ local function findTargetRifts()
                 else
                     if SearchMultiplierAny then
                         passedMultiplierFilter = true; logMessage("debug", "  - Filter: Multi "..riftData.Multiplier.." found (Any Multi OK)")
-                    else -- Specific filter active
+                    else
                         local multiplierNum = riftData.MultiplierValue
                         if not multiplierNum then logMessage("debug", "  - Skipping: Multi value unknown for specific filtering.")
                         else
-                            local targetMulti = 0
-                            local specificSelected = false
+                            local targetMulti = 0; local specificSelected = false
                             if SearchMultiplierOrAbove then
-                                -- Find the lowest selected specific multiplier for "Or Above" check
                                 if SearchMultiplier5x then targetMulti = 5; specificSelected = true end
                                 if SearchMultiplier10x and (not specificSelected or 10 < targetMulti) then targetMulti = 10; specificSelected = true end
                                 if SearchMultiplier25x and (not specificSelected or 25 < targetMulti) then targetMulti = 25; specificSelected = true end
-
-                                if specificSelected and multiplierNum >= targetMulti then
-                                    passedMultiplierFilter = true; logMessage("debug", string.format("  - Filter: Multi %s >= %sx (Or Above). MATCHES", riftData.Multiplier, targetMulti))
-                                elseif not specificSelected then
-                                     logMessage("debug", "  - Filter: 'Or Above' ON but no specific multi selected. Skipping.")
-                                else
-                                     logMessage("debug", string.format("  - Filter: Multi %s < %sx (Or Above). NO MATCH", riftData.Multiplier, targetMulti))
-                                end
-                            else -- Exact match required
+                                if specificSelected and multiplierNum >= targetMulti then passedMultiplierFilter = true; logMessage("debug", string.format("  - Filter: Multi %s >= %sx (Or Above). MATCHES", riftData.Multiplier, targetMulti))
+                                elseif not specificSelected then logMessage("debug", "  - Filter: 'Or Above' ON but no specific multi selected. Skipping.")
+                                else logMessage("debug", string.format("  - Filter: Multi %s < %sx (Or Above). NO MATCH", riftData.Multiplier, targetMulti)) end
+                            else
                                 local matchesExact = false
                                 if SearchMultiplier5x and multiplierNum == 5 then matchesExact = true end
                                 if SearchMultiplier10x and multiplierNum == 10 then matchesExact = true end
@@ -607,72 +553,36 @@ local function findTargetRifts()
                         end
                     end
                 end
-            end -- End Multiplier Logic
+            end
 
-            -- Find Details & Apply Time Filter (Only if Multiplier Filter Passed)
+            -- Find Details & Apply Time Filter
             if passedMultiplierFilter then
                 logMessage("debug", "  - Passed Multi Filter. Finding details...")
                 -- Find Position/Height
-                local sP,pP=pcall(function() return island:GetPivot().Position end); if sP and pP then riftData.Position=pP; riftData.Height=math.floor(pP.Y); foundHeight=true; logMessage("debug", "  - Height via GetPivot: "..riftData.Height) else logMessage("debug", "  - GetPivot failed."); local sPos,rPos=pcall(function() if island:IsA("Model") and island.PrimaryPart then return island.PrimaryPart.Position elseif island:IsA("BasePart") then return island.Position else local _,cf=island:GetBoundingBox(); return cf.Position end end); if sPos and rPos then riftData.Position=rPos; riftData.Height=math.floor(rPos.Y); foundHeight=true; logMessage("debug", "  - Height via Pos/BBox: "..riftData.Height) else logMessage("debug", "  - Pos/BBox failed."); local hP=nil; for _,pN in ipairs(PotentialHeightParts) do hP=island:FindFirstChild(pN,true); if hP and hP:IsA("BasePart") then break end end; if hP and hP:IsA("BasePart") then riftData.Position=hP.Position; riftData.Height=math.floor(hP.Position.Y); foundHeight=true; logMessage("debug", "  - Height via Part: "..riftData.Height) else logMessage("debug", "  - Parts failed."); for _,pN in ipairs(PotentialHeightNames) do local hV=island:FindFirstChild(pN,true); if hV and (hV:IsA("NumberValue") or hV:IsA("IntValue")) then riftData.Height=math.floor(hV.Value); foundHeight=true; logMessage("debug", "  - Height via Value: "..riftData.Height); break end end; if not foundHeight then for _,pN in ipairs(PotentialHeightNames) do local hA=island:GetAttribute(pN); if hA and type(hA)=="number" then riftData.Height=math.floor(hA); foundHeight=true; logMessage("debug", "  - Height via Attr: "..riftData.Height); break end end end end end end; if not foundHeight then logMessage("debug", "  - Height unknown.") end
+                local sP,pP=pcall(function() return island:GetPivot().Position end); if sP and pP then riftData.Position=pP; riftData.Height=math.floor(pP.Y); foundHeight=true; logMessage("debug", "  - Height via GetPivot: "..riftData.Height) else local sPos,rPos=pcall(function() if island:IsA("Model") and island.PrimaryPart then return island.PrimaryPart.Position elseif island:IsA("BasePart") then return island.Position else local _,cf=island:GetBoundingBox(); return cf.Position end end); if sPos and rPos then riftData.Position=rPos; riftData.Height=math.floor(rPos.Y); foundHeight=true; logMessage("debug", "  - Height via Pos/BBox: "..riftData.Height) else local hP=nil; for _,pN in ipairs(PotentialHeightParts) do hP=island:FindFirstChild(pN,true); if hP and hP:IsA("BasePart") then break end end; if hP and hP:IsA("BasePart") then riftData.Position=hP.Position; riftData.Height=math.floor(hP.Position.Y); foundHeight=true; logMessage("debug", "  - Height via Part: "..riftData.Height) else for _,pN in ipairs(PotentialHeightNames) do local hV=island:FindFirstChild(pN,true); if hV and (hV:IsA("NumberValue") or hV:IsA("IntValue")) then riftData.Height=math.floor(hV.Value); foundHeight=true; logMessage("debug", "  - Height via Value: "..riftData.Height); break end end; if not foundHeight then for _,pN in ipairs(PotentialHeightNames) do local hA=island:GetAttribute(pN); if hA and type(hA)=="number" then riftData.Height=math.floor(hA); foundHeight=true; logMessage("debug", "  - Height via Attr: "..riftData.Height); break end end end end end end; if not foundHeight then logMessage("debug", "  - Height unknown.") end
 
-                -- Find Time Left (Prioritize TextLabel, fallback to Value/Attribute)
+                -- Find Time Left
                 logMessage("debug", "  - Searching for Time (TextLabel first)...")
-                for _, d in ipairs(island:GetDescendants()) do
-                    if d:IsA("TextLabel") then
-                        local txt = d.Text or ""
-                        local lt = string.lower(txt)
-                        -- Look for MM:SS or sec/minutes patterns
-                        if lt:match("%d+:%d+") or lt:match("%d+ ?sec") or lt:match("%d+ ?minutes?") then
-                            riftData.TimeLeft = txt
-                            riftData.TimeSeconds = parseTime(txt) -- Use our revised parser
-                            if riftData.TimeSeconds then -- Check if parsing was successful
-                                foundTime = true
-                                logMessage("debug", "  - Time via GUI Text: " .. riftData.TimeLeft .. " -> Parsed: " .. tostring(riftData.TimeSeconds) .. "s")
-                                break -- Found time via TextLabel, stop searching descendants for time
-                            else
-                                logMessage("debug", "  - Found potential time text '"..riftData.TimeLeft.."', but failed to parse.")
-                                riftData.TimeLeft = "Parse Failed" -- Indicate parse failure
-                            end
-                        end
-                    end
-                end
-                -- Fallback to Value/Attribute if not found via TextLabel
-                if not foundTime then
-                    logMessage("debug", "  - Time not found via TextLabel, checking Values/Attributes...")
-                    for _, pN in ipairs(PotentialTimeNames) do local tV=island:FindFirstChild(pN,true); if tV and (tV:IsA("NumberValue") or tV:IsA("IntValue")) then riftData.TimeLeft=math.floor(tV.Value); riftData.TimeSeconds=riftData.TimeLeft; foundTime=true; logMessage("debug", "  - Time via Value: "..riftData.TimeLeft.."s"); break end end
-                    if not foundTime then for _, pN in ipairs(PotentialTimeNames) do local tA=island:GetAttribute(pN); if tA and type(tA)=="number" then riftData.TimeLeft=math.floor(tA); riftData.TimeSeconds=riftData.TimeLeft; foundTime=true; logMessage("debug", "  - Time via Attr: "..riftData.TimeLeft.."s"); break end end end
-                end
+                for _, d in ipairs(island:GetDescendants()) do if d:IsA("TextLabel") then local txt=d.Text or ""; local lt=string.lower(txt); if lt:match("%d+:%d+") or lt:match("%d+ ?sec") or lt:match("%d+ ?minutes?") then riftData.TimeLeft=txt; riftData.TimeSeconds=parseTime(txt); if riftData.TimeSeconds then foundTime=true; logMessage("debug", "  - Time via GUI Text: "..riftData.TimeLeft.." -> Parsed: "..tostring(riftData.TimeSeconds).."s"); break else logMessage("debug", "  - Found potential time text '"..riftData.TimeLeft.."', but failed to parse."); riftData.TimeLeft="Parse Failed" end end end end
+                if not foundTime then logMessage("debug", "  - Time not found via TextLabel, checking Values/Attributes..."); for _,pN in ipairs(PotentialTimeNames) do local tV=island:FindFirstChild(pN,true); if tV and (tV:IsA("NumberValue") or tV:IsA("IntValue")) then riftData.TimeLeft=math.floor(tV.Value); riftData.TimeSeconds=riftData.TimeLeft; foundTime=true; logMessage("debug", "  - Time via Value: "..riftData.TimeLeft.."s"); break end end; if not foundTime then for _,pN in ipairs(PotentialTimeNames) do local tA=island:GetAttribute(pN); if tA and type(tA)=="number" then riftData.TimeLeft=math.floor(tA); riftData.TimeSeconds=riftData.TimeLeft; foundTime=true; logMessage("debug", "  - Time via Attr: "..riftData.TimeLeft.."s"); break end end end end
                 if not foundTime then logMessage("debug", "  - Time unknown.") end
 
                 -- Apply Time Filter
-                if foundTime and riftData.TimeSeconds then
-                    if riftData.TimeSeconds < MINIMUM_RIFT_TIME_SECONDS then
-                        logMessage("debug", string.format("  - Filter: Skipping, Time %s (%s s) < %d s.", tostring(riftData.TimeLeft), riftData.TimeSeconds, MINIMUM_RIFT_TIME_SECONDS))
-                        passedTimeFilter = false
-                    else
-                        logMessage("debug", string.format("  - Filter: Time %s (%s s) OK.", tostring(riftData.TimeLeft), riftData.TimeSeconds))
-                        passedTimeFilter = true
-                    end
-                else
-                    logMessage("debug", "  - Time unknown. Assuming passes time filter.")
-                    passedTimeFilter = true -- Pass if time couldn't be determined
-                end
+                if foundTime and riftData.TimeSeconds then if riftData.TimeSeconds<MINIMUM_RIFT_TIME_SECONDS then logMessage("debug", string.format("  - Filter: Skipping, Time %s (%s s) < %d s.",tostring(riftData.TimeLeft),riftData.TimeSeconds,MINIMUM_RIFT_TIME_SECONDS)); passedTimeFilter=false else logMessage("debug", string.format("  - Filter: Time %s (%s s) OK.",tostring(riftData.TimeLeft),riftData.TimeSeconds)); passedTimeFilter=true end else logMessage("debug", "  - Time unknown. Assuming passes time filter."); passedTimeFilter=true end
             else logMessage("debug", "  - Skipping details (Multi Filter fail).") end
 
-            -- Check if ALL filters passed for this rift
+            -- Check if ALL filters passed
             if passedMultiplierFilter and passedTimeFilter then
                 logMessage("info", string.format(">>> MATCH VALID: %s | Time: %s (%s s) | H: %s | Multi: %s <<<", riftData.DisplayName, tostring(riftData.TimeLeft), tostring(riftData.TimeSeconds or "??"), tostring(riftData.Height), tostring(riftData.Multiplier)))
-                table.insert(foundRiftsList, riftData) -- Add to the list
+                table.insert(foundRiftsList, riftData)
             else
                 logMessage("debug", "  - Invalid/Filtered. Continuing scan...")
             end
-        -- else -- Uncomment for verbose logging of skipped types
-        --  logMessage("debug", "Skipping rift type: " .. islandName .. " (Disabled in settings)")
         end
     end
 
     logMessage("info", "Search complete. Found " .. #foundRiftsList .. " valid rift(s).");
-    return foundRiftsList -- Return the list (might be empty)
+    return foundRiftsList
 end
 
 -- Get Player Count
@@ -685,42 +595,39 @@ function startSearchAndHopLogic()
     if currentPlayers >= maxPlayers then
         logMessage("info", "Server full. Hopping...")
         attemptHop("Server full")
-        return -- Stop execution here as hop was attempted
+        return
     end
 
-    local foundRiftsList = findTargetRifts() -- Get the list of found rifts
+    local foundRiftsList = findTargetRifts()
 
     if #foundRiftsList > 0 then
         logMessage("info", "MATCH(ES) FOUND! Notifying for " .. #foundRiftsList .. " rift(s)...")
-        -- Notify for each found rift
         for _, riftData in ipairs(foundRiftsList) do
-            sendRiftNotification(riftData)
-            task.wait(0.5) -- Small delay between notifications if multiple found
+            sendRiftNotification(riftData) -- Sends ONLY to AllFindsWebhookURL now
+            task.wait(0.5)
         end
-
         logMessage("info", "Notifications sent. Hopping server...")
-        attemptHop("Found " .. #foundRiftsList .. " matching rift(s)") -- Hop after notifying for all
-
+        attemptHop("Found " .. #foundRiftsList .. " matching rift(s)")
     else
         logMessage("info", "No valid rift found matching filters. Hopping...")
-        attemptHop("Rift not found/filtered") -- Hop if nothing was found
+        attemptHop("Rift not found/filtered")
     end
-    -- Script execution ends after attemptHop is called
 end
 
 --// Initial Load Actions
 logMessage("info", "------------------------------------------------------")
-logMessage("info", "Rift Finder AUTO Loaded (V1.0)")
+logMessage("info", "Rift Finder AUTO Loaded (V1.1 - All Finds Only)")
 logMessage("info", " - Attempted to load blacklist from: " .. BLACKLIST_FILENAME)
 logMessage("info", " - Blacklist will clear after " .. MAX_BLACKLIST_SIZE .. " entries.")
+logMessage("info", " - Rift Notifications ONLY sent to AllFindsWebhookURL.")
 logMessage("info", " - Logging to: " .. (SendLogsToWebhook and "Webhook" or "Console"))
 logMessage("info", " - Check console/webhook for search details.")
 logMessage("info", " - Ensure Webhook URLs and Search Toggles are set correctly.")
 logMessage("info", " - Blacklist persistence requires executor file functions.")
 logMessage("info", "*** MANUAL RE-EXECUTION AFTER TELEPORT IS REQUIRED! ***")
 logMessage("info", "------------------------------------------------------")
-task.wait(2) -- Small delay before starting
-task.spawn(startSearchAndHopLogic) -- Start the main logic automatically
+task.wait(2)
+task.spawn(startSearchAndHopLogic)
 
 --// Cleanup
 if script and script.Destroying then
