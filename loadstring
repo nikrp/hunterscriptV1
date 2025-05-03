@@ -2,7 +2,7 @@
     Rift Finder Script - AUTO VERSION 1.23
     (Based on Manual V31.1)
 
-    - FIX: Implemented highly defensive checks and pcalls around accessing island.Name and calling string.lower within the findTargetRift function to prevent nil errors.
+    - FIX: Wrapped string.lower() call within findTargetRift in a pcall for added safety against nil island names.
     - REVERTED TO FIND FIRST: Functionality reverted to find and return only the FIRST matching rift, not all.
     - REFINED SPECIFIC WEBHOOKS: Rift notifications are ONLY sent if the rift name exists in `SpecificRiftWebhooks`. No default fallback.
     - EMBED UPDATES: Rift found embed author name ("discord.gg/rifthunter"), time field name ("Time Remaining"), and raw join link retained.
@@ -478,11 +478,16 @@ local function findTargetRift()
     local maxPlayers = Players.MaxPlayers
 
     for _, island in ipairs(islandsFolder:GetChildren()) do
-        -- *** More Robust Check ***
+        -- *** More Robust Check with pcall ***
         local processSuccess, result = pcall(function()
             if island and (island:IsA("Model") or island:IsA("Folder")) and island.Name and type(island.Name) == "string" then
                 local islandName = island.Name
-                local islandNameLower = string.lower(islandName) -- Safe now due to outer check
+                -- Safely call string.lower
+                local lowerSuccess, islandNameLower = pcall(string.lower, islandName)
+                if not lowerSuccess then
+                    warn("Failed pcall on string.lower for name:", islandName, "- Error:", islandNameLower)
+                    return -- Skip this island if string.lower fails
+                end
 
                 if SelectedIslands[islandNameLower] then
                     print("Potential match found:", islandName)
@@ -600,7 +605,7 @@ end
 
 --// Initial Load Actions (No GUI Creation)
 print("------------------------------------------------------")
-print("Rift Finder AUTO V1.22 Loaded") -- Updated Version
+print("Rift Finder AUTO V1.23 Loaded") -- Updated Version
 print(" - Log Destination:", SendLogsToWebhook and "Webhook" or "Console")
 print(" - Attempted to load blacklist from:", BLACKLIST_FILENAME)
 print(" - Blacklist will clear after", MAX_BLACKLIST_SIZE, "entries.")
