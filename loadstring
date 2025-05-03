@@ -1,12 +1,12 @@
 --[[
-    Rift Finder Script - AUTO VERSION 1.11
+    Rift Finder Script - AUTO VERSION 1.12
     (Based on Manual V31.1)
 
-    - UPDATED SPECIFIC WEBHOOKS: Changed URLs in `SpecificRiftWebhooks` table as requested.
+    - INSTANT NOTIFICATION: Rift found notifications are now sent immediately when a valid rift is found during the scan, instead of waiting until all rifts are collected. Hopping still occurs after the full scan.
     - REFINED SPECIFIC WEBHOOKS: Rift notifications are ONLY sent if the rift name exists in `SpecificRiftWebhooks`. No default fallback.
     - EMBED UPDATES: Rift found embed author name ("discord.gg/rifthunter"), time field name ("Time Remaining"), and raw join link retained.
     - TIME LOGIC REVERTED: Uses original time finding logic.
-    - FIND ALL RIFTS: Retained logic to find and notify for *all* matching rifts in a server before hopping.
+    - FIND ALL RIFTS: Still scans for all potential rifts before hopping.
     - LOGGING TOGGLE: Retained `SendLogsToWebhook` setting (defaulting to console).
     - NO GUI: All configuration is done via variables in the SETTINGS section below.
     - AUTO RUN: Executes one search-notify-hop cycle upon running the script.
@@ -456,8 +456,8 @@ local function parseMultiplier(multiplierText) if not multiplierText or type(mul
 -- Parse Time Text
 local function parseTime(timeText) if not timeText or type(timeText) ~= "string" then return nil end; local totalSeconds=0; local minutes=string.match(timeText,"(%d+) ?minutes?"); if minutes then totalSeconds=tonumber(minutes)*60; local seconds=string.match(timeText,"(%d+) ?sec"); if seconds then totalSeconds=totalSeconds+tonumber(seconds) end; return totalSeconds end; local secondsOnly=string.match(timeText,"(%d+) ?sec"); if secondsOnly then return tonumber(secondsOnly) end; local parts={}; for part in string.gmatch(timeText,"%d+") do table.insert(parts,tonumber(part)) end; if #parts==2 then totalSeconds=parts[1]*60+parts[2]; return totalSeconds elseif #parts==3 then totalSeconds=parts[1]*3600+parts[2]*60+parts[3]; return totalSeconds end; local numOnly=tonumber(timeText); if numOnly then return numOnly end; return nil end
 
--- Find Target Rift (Finds ALL matching rifts) - USING ORIGINAL FINDING LOGIC BASE
-local function findAllTargetRifts() -- Renamed function slightly for clarity
+-- Find Target Rift (Finds ALL matching rifts, Notifies Immediately) - USING ORIGINAL FINDING LOGIC BASE
+local function findAllTargetRiftsAndNotify() -- Renamed to reflect instant notification
     -- Populate SelectedIslands based on settings
     SelectedIslands = {}
     for riftName, shouldSearch in pairs(SearchRifts) do
@@ -468,7 +468,7 @@ local function findAllTargetRifts() -- Renamed function slightly for clarity
     local selectedCount = 0; for _ in pairs(SelectedIslands) do selectedCount = selectedCount + 1 end
     if selectedCount == 0 then
         warn("No rifts selected in the script settings!")
-        return {} -- Return empty table if nothing selected
+        return false -- Return false as no rifts were searched for
     end
     print("Searching for", selectedCount, "selected rift types...")
 
@@ -477,12 +477,12 @@ local function findAllTargetRifts() -- Renamed function slightly for clarity
         tostring(SearchMultiplierAny), tostring(SearchMultiplier5x), tostring(SearchMultiplier10x), tostring(SearchMultiplier25x), tostring(SearchMultiplierOrAbove), MINIMUM_RIFT_TIME_SECONDS))
 
     print("Waiting for folder '"..RENDERED_FOLDER_NAME.."' in workspace...")
-    local renderedFolder = workspace:WaitForChild(RENDERED_FOLDER_NAME, WAIT_FOR_FOLDERS_TIMEOUT); if not renderedFolder then warn("'"..RENDERED_FOLDER_NAME.."' folder not found."); return {} end
+    local renderedFolder = workspace:WaitForChild(RENDERED_FOLDER_NAME, WAIT_FOR_FOLDERS_TIMEOUT); if not renderedFolder then warn("'"..RENDERED_FOLDER_NAME.."' folder not found."); return false end
     print("Waiting for folder '"..TARGET_RIFTS_FOLDER_NAME.."' inside '"..RENDERED_FOLDER_NAME.."'...")
-    local islandsFolder = renderedFolder:WaitForChild(TARGET_RIFTS_FOLDER_NAME, WAIT_FOR_FOLDERS_TIMEOUT); if not islandsFolder then warn("'"..TARGET_RIFTS_FOLDER_NAME.."' folder not found."); return {} end
+    local islandsFolder = renderedFolder:WaitForChild(TARGET_RIFTS_FOLDER_NAME, WAIT_FOR_FOLDERS_TIMEOUT); if not islandsFolder then warn("'"..TARGET_RIFTS_FOLDER_NAME.."' folder not found."); return false end
     print("Scanning folder:", islandsFolder:GetFullName())
 
-    local foundRiftsList = {} -- Initialize table to store found rifts
+    local anyRiftFound = false -- Flag to track if at least one rift was found
 
     for _, island in ipairs(islandsFolder:GetChildren()) do
         if not (island:IsA("Model") or island:IsA("Folder")) then continue end
@@ -617,15 +617,46 @@ local function findAllTargetRifts() -- Renamed function slightly for clarity
 
             -- Check if ALL filters passed
             if passedMultiplierFilter and passedTimeFilter then
+                anyRiftFound = true -- Mark that we found at least one
                 print(string.format(">>> MATCH VALID: %s | Time: %s (%s s) | H: %s | Multi: %s <<<", riftData.DisplayName, tostring(riftData.TimeLeft), tostring(riftData.TimeSeconds or "??"), tostring(riftData.Height), tostring(riftData.Multiplier)))
-                table.insert(foundRiftsList, riftData) -- Add valid rift to the list
+
+                -- *** SEND NOTIFICATION IMMEDIATELY ***
+                local pCount = getServerPlayerCount() -- Get current player count for this specific rift
+                local link = string.format("roblox://experiences/start?placeId=%d&gameInstanceId=%s", PlaceId, CurrentJobId)
+                local serverMsg = "JobId: " .. (CurrentJobId or "??")
+                local title = riftData.DisplayName
+                local imgUrl = RiftImageMapping[riftData.NameLower]
+                local footerText = "discord.gg/rifthunter - the best ever rift finding service"
+                local timeDisplay = tostring(riftData.TimeLeft)
+                local formattedMSS = formatSecondsToMSS(riftData.TimeSeconds)
+                if formattedMSS then timeDisplay = formattedMSS elseif riftData.TimeSeconds then timeDisplay = tostring(riftData.TimeSeconds) .. "s" end
+
+                local embed = {
+                    title = "✅ Rift Found: " .. title, color = 65280, timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+                    fields = {
+                        {name="✨ Multi", value=tostring(riftData.Multiplier), inline=true},
+                        {name="🕒 Time Remaining", value=timeDisplay, inline=true},
+                        {name="📏 Height", value=tostring(riftData.Height), inline=true},
+                        {name="🧍 Players", value=string.format("%d/%d", pCount, maxPlayers or "?"), inline=true}, -- Use maxPlayers from outer scope if available
+                        {name="🆔 Server", value=serverMsg, inline=true},
+                        {name="🔗 Join", value=link, inline=false},
+                        {name="💡 How to Use", value="Copy and paste the link into your browser", inline=false}
+                    },
+                    footer = { text = footerText }
+                }
+                if imgUrl and imgUrl ~= "PASTE_URL_HERE" and imgUrl:find("https://") then embed.thumbnail = { url = imgUrl }; print(" - Added thumbnail for:", title) else print(" - No valid thumbnail for:", title) end
+                local payload = { username = "discord.gg/rifthunter", embeds = { embed } }
+                sendRiftFoundNotification(riftData.NameLower, payload)
+                print("Notification sent immediately for", title, "(if webhook worked).")
+                task.wait(0.5) -- Small delay after sending before continuing scan
+
             else
                 print("  - Invalid/Filtered. Continuing...")
             end
         end
     end
-    print("Search complete. Found", #foundRiftsList, "valid rift(s).")
-    return foundRiftsList -- Return the list of found rifts
+    print("Search complete.")
+    return anyRiftFound -- Return true if any rift was found and notified, false otherwise
 end
 
 
@@ -643,7 +674,7 @@ local function formatSecondsToMSS(totalSeconds)
     end
 end
 
--- Main Search and Hop Logic (Instant Hop, Notifies All Found)
+-- Main Search and Hop Logic (Instant Notification)
 function startSearchAndHopLogic()
     if BotStarted then print("Logic already running, preventing duplicate run."); return end
     BotStarted = true -- Set flag
@@ -651,60 +682,13 @@ function startSearchAndHopLogic()
     local currentPlayers = getServerPlayerCount(); local maxPlayers = Players.MaxPlayers; print(string.format("Start cycle. Players: %d/%d", currentPlayers, maxPlayers))
     if currentPlayers >= maxPlayers then print("Server full. Hopping..."); attemptHop("Server full"); BotStarted = false; return end -- Exit after hop attempt
 
-    local allFoundRiftData = findAllTargetRifts() -- Get list of all found rifts
+    local riftWasFound = findAllTargetRiftsAndNotify() -- Scan and notify immediately
 
-    if #allFoundRiftData > 0 then -- Check if the list is not empty
-        print(string.format("MATCH(ES) FOUND! Notifying for %d rift(s) and hopping immediately...", #allFoundRiftData))
-        local pCount = getServerPlayerCount() -- Get player count once for all notifications in this server
-
-        for i, foundRiftData in ipairs(allFoundRiftData) do
-            local link = string.format("roblox://experiences/start?placeId=%d&gameInstanceId=%s", PlaceId, CurrentJobId)
-            local serverMsg = "JobId: " .. (CurrentJobId or "??")
-            local title = foundRiftData.DisplayName
-            local imgUrl = RiftImageMapping[foundRiftData.NameLower]
-            local footerText = "discord.gg/rifthunter - the best ever rift finding service"
-            -- Format Time Display
-            local timeDisplay = tostring(foundRiftData.TimeLeft) -- Default to original text
-            local formattedMSS = formatSecondsToMSS(foundRiftData.TimeSeconds)
-            if formattedMSS then
-                timeDisplay = formattedMSS -- Show M:SS if possible
-            elseif foundRiftData.TimeSeconds then
-                 timeDisplay = tostring(foundRiftData.TimeSeconds) .. "s" -- Fallback to seconds if formatting failed but seconds exist
-            end
-
-            local embed = {
-                title = "✅ Rift Found: " .. title,
-                color = 65280, -- Green color
-                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-                fields = {
-                    {name="✨ Multi", value=tostring(foundRiftData.Multiplier), inline=true},
-                    {name="🕒 Time Remaining", value=timeDisplay, inline=true}, -- Use formatted time & new name
-                    {name="📏 Height", value=tostring(foundRiftData.Height), inline=true},
-                    {name="🧍 Players", value=string.format("%d/%d", pCount, maxPlayers), inline=true},
-                    {name="🆔 Server", value=serverMsg, inline=true},
-                    {name="🔗 Join", value=link, inline=false},
-                    {name="💡 How to Use", value="Copy and paste the link into your browser", inline=false}
-                },
-                footer = { text = footerText }
-            }
-            if imgUrl and imgUrl ~= "PASTE_URL_HERE" and imgUrl:find("https://") then embed.thumbnail = { url = imgUrl }; print(" - Added thumbnail for:", title) else print(" - No valid thumbnail for:", title) end
-
-            -- *** Set author name here ***
-            local payload = { username = "discord.gg/rifthunter", embeds = { embed } }
-
-            -- Call the specific notification function, passing the lowercase rift name and the payload
-            sendRiftFoundNotification(foundRiftData.NameLower, payload)
-            print(string.format("Notification %d/%d sent for %s (if webhook worked).", i, #allFoundRiftData, title))
-            if i < #allFoundRiftData then
-                task.wait(0.5) -- Small delay between notifications if multiple found
-            end
-        end
-
-        print("Finished sending notifications. Hopping immediately...")
+    if riftWasFound then
+        print("Finished scan, at least one rift was found. Hopping immediately...")
         attemptHop("Rift(s) found, hopping immediately")
-
     else
-        print("No valid rift found. Hopping...");
+        print("No valid rift found during scan. Hopping...");
         attemptHop("Rift not found/filtered")
     end
     BotStarted = false; -- Reset flag after hop attempt finishes (or fails)
@@ -712,7 +696,7 @@ end
 
 --// Initial Load Actions (No GUI Creation)
 print("------------------------------------------------------")
-print("Rift Finder AUTO V1.10 Loaded") -- Updated Version
+print("Rift Finder AUTO V1.12 Loaded") -- Updated Version
 print(" - Log Destination:", SendLogsToWebhook and "Webhook" or "Console")
 print(" - Attempted to load blacklist from:", BLACKLIST_FILENAME)
 print(" - Blacklist will clear after", MAX_BLACKLIST_SIZE, "entries.")
