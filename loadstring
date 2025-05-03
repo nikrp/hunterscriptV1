@@ -47,7 +47,7 @@ local SpecificRiftWebhooks = {
 
 -- *** Optional Log Webhook ***
 local LogWebhookURL = "https://discord.com/api/webhooks/1367736721919315999/afw2j_udXzS5vCnvZiHaJvYhkxTEOavdNnUrY-bAWlYccbZyuzAqCfE7U9tEB8QszeG9" -- Webhook for script logs (Still used if enabled)
-local SendLogsToWebhook = false -- Set to 'true' to send logs to LogWebhookURL, 'false' to print to console only.
+local SendLogsToWebhook = true -- Set to 'true' to send logs to LogWebhookURL, 'false' to print to console only.
 
 -- *** Blacklist Settings ***
 local BLACKLIST_FILENAME = "RiftFinder_Auto_Blacklist.json" -- Filename for the blacklist. Adjust path if needed (e.g., "workspace/RiftFinder_Auto_Blacklist.json")
