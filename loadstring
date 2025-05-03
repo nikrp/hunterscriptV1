@@ -1,11 +1,12 @@
 --[[
-    Rift Finder Script - AUTO VERSION 1.3
+    Rift Finder Script - AUTO VERSION 1.24
     (Based on Manual V31.1)
 
-    - SPECIFIC WEBHOOKS: Added `SpecificRiftWebhooks` table. Notifications for listed rifts go to their specific URL, others use the default `RiftWebhookURL`.
-    - FIND ALL RIFTS: Retained logic to find and notify for *all* matching rifts in a server before hopping.
-    - LOGGING TOGGLE: Added `SendLogsToWebhook` setting. Logs go to console if false, webhook if true.
-    - EMBED UPDATES: Rift found embed has improved time format (M:SS), professional footer, and "How to Use" field.
+    - FIX: Reordered safety checks in `findTargetRift` to prioritize getting a valid name via pcall before type checking and calling string.lower (also pcalled).
+    - FIND FIRST MATCH: Returns only the FIRST valid match found or nil. Notification moved back to main logic.
+    - REFINED SPECIFIC WEBHOOKS: Rift notifications are ONLY sent if the rift name exists in `SpecificRiftWebhooks`. No default fallback.
+    - EMBED UPDATES: Rift found embed author name ("discord.gg/rifthunter"), time field name ("Time Remaining"), and raw join link retained.
+    - LOGGING TOGGLE: Retained `SendLogsToWebhook` setting (defaulting to console).
     - NO GUI: All configuration is done via variables in the SETTINGS section below.
     - AUTO RUN: Executes one search-notify-hop cycle upon running the script.
     - HOP NOTIFICATION: Sent as embed to separate HopWebhookURL.
@@ -22,7 +23,7 @@
     IMPORTANT NOTES:
     1.  Persistent Blacklist: Requires executor support for `readfile`/`writefile`/`isfile`. Adapt names/path! Blacklist now resets after 35 entries.
     2.  Hopping/Blacklist Reliability: Depends on `request` function working correctly. Rate limiting may still occur.
-    3.  Webhook: Also depends on `request` or HttpService not being blocked. Rift finds, hop notifications, and logs now use separate URLs. Check `SendLogsToWebhook` setting.
+    3.  Webhook: Also depends on `request` or HttpService not being blocked. Rift finds ONLY go to SPECIFIC URLs defined below. Hop notifications and logs use separate URLs. Check `SendLogsToWebhook` setting.
     4.  Rate Limit Errors: If "Too many requests" persists, the delay in `getServers` might need further adjustment.
     5.  Manual Re-execution REQUIRED for each search cycle.
     6.  Game Updates / Executor Changes: Can break the script.
@@ -32,12 +33,13 @@
 --// ######################## SETTINGS ########################
 
 -- --- Webhook URLs ---
-local RiftWebhookURL = "https://discord.com/api/webhooks/1365884302684065943/xEFryRlllaI3-geqOI1VAI4rRrEg1S7O11aEnUBslfHagPaOhJv_N5Ka_rIEp4FsJbWj" -- *** DEFAULT Webhook for RIFT FOUND notifications (used if not listed below) ***
+-- local RiftWebhookURL = "..." -- DEFAULT Webhook (NOT USED FOR RIFT FINDS in this version)
 local HopWebhookURL = "https://discord.com/api/webhooks/1367734421846757396/H3Xu33wUAjxHlqIT64qLixxW77RJcwsg02iZaMgDFBZEQpRZt7Ufo-lILBk_nJdyNPfi" -- *** Webhook for HOPPING notifications ***
 local LogWebhookURL = "https://discord.com/api/webhooks/1367736721919315999/afw2j_udXzS5vCnvZiHaJvYhkxTEOavdNnUrY-bAWlYccbZyuzAqCfE7U9tEB8QszeG9" -- *** Webhook for ALL script logs (print/warn) ***
 -- local AllFindsWebhookURL = "..." -- Removed
 
 -- --- Specific Rift Webhooks (Map lowercase rift name to URL - ONLY THESE WILL BE NOTIFIED) ---
+-- *** UPDATED URLS ***
 local SpecificRiftWebhooks = {
     ["rainbow-egg"] = "https://discord.com/api/webhooks/1367744311008956486/KCHFuRYjpHkpHdz2BjfB2zU9o0Tf43PYLH3WE6iwArMBahLd34_sjvRIomDz5Eph95Pv",
     ["void-egg"] = "https://discord.com/api/webhooks/1367744483650703440/6jWdoyLd_M2V8eeCROrxhsmwbcHS3BpNZuDEvrFYn1eW1DLtuwCG2odhXHKVGY5IRr81",
@@ -609,7 +611,7 @@ end
 
 --// Initial Load Actions (No GUI Creation)
 print("------------------------------------------------------")
-print("Rift Finder AUTO V1.23 Loaded") -- Updated Version
+print("Rift Finder AUTO V1.24 Loaded") -- Updated Version
 print(" - Log Destination:", SendLogsToWebhook and "Webhook" or "Console")
 print(" - Attempted to load blacklist from:", BLACKLIST_FILENAME)
 print(" - Blacklist will clear after", MAX_BLACKLIST_SIZE, "entries.")
