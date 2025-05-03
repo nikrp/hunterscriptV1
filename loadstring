@@ -1,19 +1,21 @@
 --[[
-    Rift Finder Script - AUTO VERSION 2.0 (Restarted Build)
+    Rift Finder Script - AUTO VERSION 1.23
+    (Based on Manual V31.1)
 
-    - RESTARTED BUILD: Based on the user's original script's find logic for stability.
-    - FIND FIRST MATCH: Function `findTargetRift` returns the first valid match found or nil.
-    - SPECIFIC WEBHOOKS ONLY: Rift notifications are ONLY sent if the rift name exists in `SpecificRiftWebhooks`. No default fallback.
-    - EMBED UPDATES: Rift found embed uses updated format (author, time field, raw link, footer).
-    - LOGGING TOGGLE: Configurable logging destination (Console or Webhook).
-    - NO GUI: Configuration via script variables.
-    - AUTO RUN: Executes one search-notify-hop cycle.
+    - FIX: Wrapped string.lower() call within findTargetRift in a pcall for added safety against nil island names.
+    - REVERTED TO FIND FIRST: Functionality reverted to find and return only the FIRST matching rift, not all.
+    - REFINED SPECIFIC WEBHOOKS: Rift notifications are ONLY sent if the rift name exists in `SpecificRiftWebhooks`. No default fallback.
+    - EMBED UPDATES: Rift found embed author name ("discord.gg/rifthunter"), time field name ("Time Remaining"), and raw join link retained.
+    - LOGGING TOGGLE: Retained `SendLogsToWebhook` setting (defaulting to console).
+    - NO GUI: All configuration is done via variables in the SETTINGS section below.
+    - AUTO RUN: Executes one search-notify-hop cycle upon running the script.
     - HOP NOTIFICATION: Sent as embed to separate HopWebhookURL.
     - BLACKLIST LIMIT: Clears blacklist after 35 entries.
     - MULTIPLIER OR ABOVE: Configurable via variable.
-    - PERSISTENT BLACKLIST ATTEMPT: Includes load/save functions (Executor-dependent).
-                                     *** USER ACTION REQUIRED: Replace placeholder file function names and
+    - PERSISTENT BLACKLIST ATTEMPT: Retained functions to load/save the blacklist.
+                                     *** USER ACTION REQUIRED: Replace placeholder function names and
                                          potentially the filename/path with ones specific to your executor! ***
+    - FIND LOGIC: Uses original detail-finding methods.
     - Blacklisting: Uses `_G.visitedServers`.
     - NOTE: Webhook/Server List fetching depends heavily on executor's `request` function. Sending cannot be guaranteed if blocked.
     - You MUST MANUALLY RE-EXECUTE the script for each cycle.
@@ -37,6 +39,7 @@ local LogWebhookURL = "https://discord.com/api/webhooks/1367736721919315999/afw2
 -- local AllFindsWebhookURL = "..." -- Removed
 
 -- --- Specific Rift Webhooks (Map lowercase rift name to URL - ONLY THESE WILL BE NOTIFIED) ---
+-- *** UPDATED URLS ***
 local SpecificRiftWebhooks = {
     ["rainbow-egg"] = "https://discord.com/api/webhooks/1367744311008956486/KCHFuRYjpHkpHdz2BjfB2zU9o0Tf43PYLH3WE6iwArMBahLd34_sjvRIomDz5Eph95Pv",
     ["void-egg"] = "https://discord.com/api/webhooks/1367744483650703440/6jWdoyLd_M2V8eeCROrxhsmwbcHS3BpNZuDEvrFYn1eW1DLtuwCG2odhXHKVGY5IRr81",
@@ -51,10 +54,11 @@ local SpecificRiftWebhooks = {
 local SendLogsToWebhook = false -- Set to true to send logs to LogWebhookURL, false to send to console
 
 -- --- Blacklist Settings ---
-local BLACKLIST_FILENAME = "RiftFinder_Blacklist_Auto_V2.json" -- Use a distinct name for V2
+local BLACKLIST_FILENAME = "RiftFinder_Blacklist_Auto.json" -- Filename for the blacklist. Adjust path if needed. Use a different name than manual version!
 local MAX_BLACKLIST_SIZE = 35 -- Set the maximum size before clearing the blacklist
 
 -- --- Rift Selection (Set to true to search for it, false to ignore) ---
+-- *** UPDATED DEFAULT SETTINGS ***
 local SearchRifts = {
     -- Eggs
     ["common-egg"] = false,
@@ -80,6 +84,7 @@ local SearchRifts = {
 }
 
 -- --- Multiplier Filter Settings ---
+-- *** UPDATED DEFAULT SETTINGS ***
 local SearchMultiplierAny = false      -- Set to true to ignore specific multipliers below and find any rift regardless of multi (unless N/A type)
 local SearchMultiplier5x = false      -- Set to true to search for 5x multiplier
 local SearchMultiplier10x = true     -- Set to true to search for 10x multiplier
@@ -473,57 +478,51 @@ local function findTargetRift()
     local maxPlayers = Players.MaxPlayers
 
     for _, island in ipairs(islandsFolder:GetChildren()) do
-        -- *** Wrap processing in pcall for safety ***
+        -- *** More Robust Check with pcall ***
         local processSuccess, result = pcall(function()
-            -- Initial checks for valid instance and name
-            if not (island and (island:IsA("Model") or island:IsA("Folder")) and island.Name and type(island.Name) == "string") then
-                if island and island.Name then warn("Skipping instance with invalid type or non-string name:", island:GetFullName(), "("..island.ClassName..")")
-                elseif island then warn("Skipping instance without a valid name:", island:GetFullName(), "("..island.ClassName..")")
-                else warn("Skipping invalid instance found in Rifts folder.") end
-                return -- Skip this iteration within pcall
-            end
-
-            local islandName = island.Name
-            -- Safely get lowercase name
-            local lowerSuccess, islandNameLower = pcall(string.lower, islandName)
-            if not lowerSuccess then
-                warn("Failed pcall on string.lower for name:", islandName, "- Error:", islandNameLower)
-                return -- Skip this iteration within pcall
-            end
-
-            if SelectedIslands[islandNameLower] then
-                print("Potential match found:", islandName)
-                local displayName = RiftDisplayNameMapping[islandNameLower] or islandName
-                local riftData = { Name = islandName, NameLower = islandNameLower, DisplayName = displayName, TimeLeft = "Unknown", TimeSeconds = nil, Height = "Unknown", Position = "Unknown", Multiplier = "Unknown", MultiplierValue = nil, Instance = island }
-                local foundMultiplier, foundTime, foundHeight = false, false, false
-                local passedMultiplierFilter = false
-                local passedTimeFilter = true
-
-                -- Determine Multiplier (Original Logic Style)
-                if NoMultiplierTypes[islandNameLower] then
-                    print("  - Type has no multiplier. Setting to N/A.")
-                    riftData.Multiplier = "N/A"; riftData.MultiplierValue = nil; foundMultiplier = true
-                    passedMultiplierFilter = true
-                else
-                    for _, pName in ipairs(PotentialMultiplierNames) do local obj=island:FindFirstChild(pName,true); if obj and obj:IsA("ValueBase") then local v=obj.Value; if type(v)=="number" then riftData.Multiplier=tostring(v).."x"; riftData.MultiplierValue=v; foundMultiplier=true; print("  - Found Multi via Value:", riftData.Multiplier); break elseif type(v)=="string" and v:match("^[%d%.]+x?$") then riftData.Multiplier=v; if not v:find("x",1,true) then riftData.Multiplier=v.."x" end; riftData.MultiplierValue=parseMultiplier(v); foundMultiplier=true; print("  - Found Multi via StringValue:", riftData.Multiplier); break end end end
-                    if not foundMultiplier then for _, pName in ipairs(PotentialMultiplierNames) do local att=island:GetAttribute(pName); if att then if type(att)=="number" then riftData.Multiplier=tostring(att).."x"; riftData.MultiplierValue=att; foundMultiplier=true; print("  - Found Multi via Attribute:", riftData.Multiplier); break elseif type(att)=="string" and att:match("^[%d%.]+x?$") then riftData.Multiplier=att; if not att:find("x",1,true) then riftData.Multiplier=att.."x" end; riftData.MultiplierValue=parseMultiplier(att); foundMultiplier=true; print("  - Found Multi via String Attribute:", riftData.Multiplier); break end end end end
-                    if not foundMultiplier then for _, d in ipairs(island:GetDescendants()) do if d:IsA("TextLabel") then local txt=d.Text or ""; local lt=string.lower(txt); if lt:match("x%d") or lt:match("%dx") then riftData.Multiplier=txt; riftData.MultiplierValue=parseMultiplier(txt); foundMultiplier=true; print("  - Found potential Multi via GUI Text:", riftData.Multiplier); break end end end end
-
-                    if not foundMultiplier then print("  - Could not find Multiplier."); if SearchMultiplierAny then passedMultiplierFilter=true; print("  - Filter: Processing anyway (Any)") else print("  - Filter: Skipping (Specific & Multi unknown)") end
-                    else if SearchMultiplierAny then passedMultiplierFilter=true; print("  - Filter: Multi",riftData.Multiplier,"found (Any)") else local mN=riftData.MultiplierValue; if not mN then print("  - Skipping: Multi value unknown") else local tM=0; local sS=false; if SearchMultiplierOrAbove then if SearchMultiplier5x then tM=5;sS=true end; if SearchMultiplier10x and (not sS or 10<tM) then tM=10;sS=true end; if SearchMultiplier25x and (not sS or 25<tM) then tM=25;sS=true end; if sS and mN>=tM then passedMultiplierFilter=true; print(string.format("  - Filter: Multi %s >= %sx (Or Above). MATCHES", riftData.Multiplier, tM)) elseif not sS then print("  - Filter: 'Or Above' ON but no specific multi selected. Skipping.") else print(string.format("  - Filter: Multi %s < %sx (Or Above). NO MATCH", riftData.Multiplier, tM)) end else local mE=(SearchMultiplier5x and mN==5) or (SearchMultiplier10x and mN==10) or (SearchMultiplier25x and mN==25); if mE then passedMultiplierFilter=true; print("  - Filter: Multi",riftData.Multiplier,"MATCHES exact") else print("  - Filter: Multi",riftData.Multiplier,"NO exact match") end end end end end
+            if island and (island:IsA("Model") or island:IsA("Folder")) and island.Name and type(island.Name) == "string" then
+                local islandName = island.Name
+                -- Safely call string.lower
+                local lowerSuccess, islandNameLower = pcall(string.lower, islandName)
+                if not lowerSuccess then
+                    warn("Failed pcall on string.lower for name:", islandName, "- Error:", islandNameLower)
+                    return -- Skip this island if string.lower fails
                 end
 
-                if passedMultiplierFilter then
-                    print("  - Passed Multi Filter. Finding details...")
-                    local sP_h,pP_h=pcall(function() return island:GetPivot().Position end); if sP_h and pP_h then riftData.Position=pP_h; riftData.Height=math.floor(pP_h.Y); foundHeight=true; print("  - Height via GetPivot:",riftData.Height) else print("  - GetPivot failed."); local sPos_h,rPos_h=pcall(function() if island:IsA("Model") and island.PrimaryPart then return island.PrimaryPart.Position elseif island:IsA("BasePart") then return island.Position else local _,cf=island:GetBoundingBox(); return cf.Position end end); if sPos_h and rPos_h then riftData.Position=rPos_h; riftData.Height=math.floor(rPos_h.Y); foundHeight=true; print("  - Height via Pos/BBox:",riftData.Height) else print("  - Pos/BBox failed."); local hP=nil; for _,pN in ipairs(PotentialHeightParts) do hP=island:FindFirstChild(pN,true); if hP and hP:IsA("BasePart") then break end end; if hP and hP:IsA("BasePart") then riftData.Position=hP.Position; riftData.Height=math.floor(hP.Position.Y); foundHeight=true; print("  - Height via Part:",riftData.Height) else print("  - Parts failed."); for _,pN in ipairs(PotentialHeightNames) do local hV=island:FindFirstChild(pN,true); if hV and (hV:IsA("NumberValue") or hV:IsA("IntValue")) then riftData.Height=math.floor(hV.Value); foundHeight=true; print("  - Height via Value:",riftData.Height); break end end; if not foundHeight then for _,pN in ipairs(PotentialHeightNames) do local hA=island:GetAttribute(pN); if hA and type(hA)=="number" then riftData.Height=math.floor(hA); foundHeight=true; print("  - Height via Attr:",riftData.Height); break end end end end end end; if not foundHeight then print("  - Height unknown.") end
-                    print("  - Searching for Time (Original Method)..."); foundTime = false; for _,pN in ipairs(PotentialTimeNames) do local tV=island:FindFirstChild(pN,true); if tV and (tV:IsA("NumberValue") or tV:IsA("IntValue")) then riftData.TimeLeft=math.floor(tV.Value); riftData.TimeSeconds=riftData.TimeLeft; foundTime=true; print("  - Time via Value:", riftData.TimeLeft); break end end; if not foundTime then for _,pN in ipairs(PotentialTimeNames) do local tA=island:GetAttribute(pN); if tA and type(tA)=="number" then riftData.TimeLeft=math.floor(tA); riftData.TimeSeconds=riftData.TimeLeft; foundTime=true; print("  - Time via Attr:",riftData.TimeLeft); break end end end; if not foundTime then for _,d in ipairs(island:GetDescendants()) do if d:IsA("TextLabel") then local txt=d.Text or ""; local lt=string.lower(txt); if lt:match("%d+:%d+") or lt:match("%d+ ?sec") or lt:match("%d+ ?minutes?") then riftData.TimeLeft=txt; riftData.TimeSeconds=parseTime(txt); foundTime=true; print("  - Time via GUI Text:",riftData.TimeLeft,"-> Parsed Secs:",tostring(riftData.TimeSeconds or "nil")); break end end end end; if not foundTime then print("  - Time unknown.") end
-                    if foundTime and riftData.TimeSeconds then if riftData.TimeSeconds<MINIMUM_RIFT_TIME_SECONDS then print(string.format("  - Filter: Skipping, Time %s (%s s)<%d s.",tostring(riftData.TimeLeft),riftData.TimeSeconds,MINIMUM_RIFT_TIME_SECONDS)); passedTimeFilter=false else print(string.format("  - Filter: Time %s (%s s) OK.",tostring(riftData.TimeLeft),riftData.TimeSeconds)); passedTimeFilter=true end else print("  - Time unknown. Assuming passes filter."); passedTimeFilter=true end
-                else print("  - Skipping details (Multi Filter fail).") end
+                if SelectedIslands[islandNameLower] then
+                    print("Potential match found:", islandName)
+                    local displayName = RiftDisplayNameMapping[islandNameLower] or islandName
+                    local riftData = { Name = islandName, NameLower = islandNameLower, DisplayName = displayName, TimeLeft = "Unknown", TimeSeconds = nil, Height = "Unknown", Position = "Unknown", Multiplier = "Unknown", MultiplierValue = nil, Instance = island }
+                    local foundMultiplier, foundTime, foundHeight = false, false, false
+                    local passedMultiplierFilter = false
+                    local passedTimeFilter = true
 
-                if passedMultiplierFilter and passedTimeFilter then
-                    print(string.format(">>> MATCH VALID: %s | Time: %s (%s s) | H: %s | Multi: %s <<<", riftData.DisplayName, tostring(riftData.TimeLeft), tostring(riftData.TimeSeconds or "??"), tostring(riftData.Height), tostring(riftData.Multiplier)))
-                    error(riftData) -- Use error to stop the pcall and return the data
-                else print("  - Invalid/Filtered. Continuing...") end
+                    -- Determine Multiplier (Original Logic Style)
+                    if NoMultiplierTypes[islandNameLower] then
+                        print("  - Type has no multiplier. Setting to N/A.")
+                        riftData.Multiplier = "N/A"; riftData.MultiplierValue = nil; foundMultiplier = true
+                        passedMultiplierFilter = true
+                    else
+                        for _, pName in ipairs(PotentialMultiplierNames) do local obj=island:FindFirstChild(pName,true); if obj and obj:IsA("ValueBase") then local v=obj.Value; if type(v)=="number" then riftData.Multiplier=tostring(v).."x"; riftData.MultiplierValue=v; foundMultiplier=true; print("  - Found Multi via Value:", riftData.Multiplier); break elseif type(v)=="string" and v:match("^[%d%.]+x?$") then riftData.Multiplier=v; if not v:find("x",1,true) then riftData.Multiplier=v.."x" end; riftData.MultiplierValue=parseMultiplier(v); foundMultiplier=true; print("  - Found Multi via StringValue:", riftData.Multiplier); break end end end
+                        if not foundMultiplier then for _, pName in ipairs(PotentialMultiplierNames) do local att=island:GetAttribute(pName); if att then if type(att)=="number" then riftData.Multiplier=tostring(att).."x"; riftData.MultiplierValue=att; foundMultiplier=true; print("  - Found Multi via Attribute:", riftData.Multiplier); break elseif type(att)=="string" and att:match("^[%d%.]+x?$") then riftData.Multiplier=att; if not att:find("x",1,true) then riftData.Multiplier=att.."x" end; riftData.MultiplierValue=parseMultiplier(att); foundMultiplier=true; print("  - Found Multi via String Attribute:", riftData.Multiplier); break end end end end
+                        if not foundMultiplier then for _, d in ipairs(island:GetDescendants()) do if d:IsA("TextLabel") then local txt=d.Text or ""; local lt=string.lower(txt); if lt:match("x%d") or lt:match("%dx") then riftData.Multiplier=txt; riftData.MultiplierValue=parseMultiplier(txt); foundMultiplier=true; print("  - Found potential Multi via GUI Text:", riftData.Multiplier); break end end end end
+
+                        if not foundMultiplier then print("  - Could not find Multiplier."); if SearchMultiplierAny then passedMultiplierFilter=true; print("  - Filter: Processing anyway (Any)") else print("  - Filter: Skipping (Specific & Multi unknown)") end
+                        else if SearchMultiplierAny then passedMultiplierFilter=true; print("  - Filter: Multi",riftData.Multiplier,"found (Any)") else local mN=riftData.MultiplierValue; if not mN then print("  - Skipping: Multi value unknown") else local tM=0; local sS=false; if SearchMultiplierOrAbove then if SearchMultiplier5x then tM=5;sS=true end; if SearchMultiplier10x and (not sS or 10<tM) then tM=10;sS=true end; if SearchMultiplier25x and (not sS or 25<tM) then tM=25;sS=true end; if sS and mN>=tM then passedMultiplierFilter=true; print(string.format("  - Filter: Multi %s >= %sx (Or Above). MATCHES", riftData.Multiplier, tM)) elseif not sS then print("  - Filter: 'Or Above' ON but no specific multi selected. Skipping.") else print(string.format("  - Filter: Multi %s < %sx (Or Above). NO MATCH", riftData.Multiplier, tM)) end else local mE=(SearchMultiplier5x and mN==5) or (SearchMultiplier10x and mN==10) or (SearchMultiplier25x and mN==25); if mE then passedMultiplierFilter=true; print("  - Filter: Multi",riftData.Multiplier,"MATCHES exact") else print("  - Filter: Multi",riftData.Multiplier,"NO exact match") end end end end end
+                    end
+
+                    if passedMultiplierFilter then
+                        print("  - Passed Multi Filter. Finding details...")
+                        local sP_h,pP_h=pcall(function() return island:GetPivot().Position end); if sP_h and pP_h then riftData.Position=pP_h; riftData.Height=math.floor(pP_h.Y); foundHeight=true; print("  - Height via GetPivot:",riftData.Height) else print("  - GetPivot failed."); local sPos_h,rPos_h=pcall(function() if island:IsA("Model") and island.PrimaryPart then return island.PrimaryPart.Position elseif island:IsA("BasePart") then return island.Position else local _,cf=island:GetBoundingBox(); return cf.Position end end); if sPos_h and rPos_h then riftData.Position=rPos_h; riftData.Height=math.floor(rPos_h.Y); foundHeight=true; print("  - Height via Pos/BBox:",riftData.Height) else print("  - Pos/BBox failed."); local hP=nil; for _,pN in ipairs(PotentialHeightParts) do hP=island:FindFirstChild(pN,true); if hP and hP:IsA("BasePart") then break end end; if hP and hP:IsA("BasePart") then riftData.Position=hP.Position; riftData.Height=math.floor(hP.Position.Y); foundHeight=true; print("  - Height via Part:",riftData.Height) else print("  - Parts failed."); for _,pN in ipairs(PotentialHeightNames) do local hV=island:FindFirstChild(pN,true); if hV and (hV:IsA("NumberValue") or hV:IsA("IntValue")) then riftData.Height=math.floor(hV.Value); foundHeight=true; print("  - Height via Value:",riftData.Height); break end end; if not foundHeight then for _,pN in ipairs(PotentialHeightNames) do local hA=island:GetAttribute(pN); if hA and type(hA)=="number" then riftData.Height=math.floor(hA); foundHeight=true; print("  - Height via Attr:",riftData.Height); break end end end end end end; if not foundHeight then print("  - Height unknown.") end
+                        print("  - Searching for Time (Original Method)..."); foundTime = false; for _,pN in ipairs(PotentialTimeNames) do local tV=island:FindFirstChild(pN,true); if tV and (tV:IsA("NumberValue") or tV:IsA("IntValue")) then riftData.TimeLeft=math.floor(tV.Value); riftData.TimeSeconds=riftData.TimeLeft; foundTime=true; print("  - Time via Value:", riftData.TimeLeft); break end end; if not foundTime then for _,pN in ipairs(PotentialTimeNames) do local tA=island:GetAttribute(pN); if tA and type(tA)=="number" then riftData.TimeLeft=math.floor(tA); riftData.TimeSeconds=riftData.TimeLeft; foundTime=true; print("  - Time via Attr:",riftData.TimeLeft); break end end end; if not foundTime then for _,d in ipairs(island:GetDescendants()) do if d:IsA("TextLabel") then local txt=d.Text or ""; local lt=string.lower(txt); if lt:match("%d+:%d+") or lt:match("%d+ ?sec") or lt:match("%d+ ?minutes?") then riftData.TimeLeft=txt; riftData.TimeSeconds=parseTime(txt); foundTime=true; print("  - Time via GUI Text:",riftData.TimeLeft,"-> Parsed Secs:",tostring(riftData.TimeSeconds or "nil")); break end end end end; if not foundTime then print("  - Time unknown.") end
+                        if foundTime and riftData.TimeSeconds then if riftData.TimeSeconds<MINIMUM_RIFT_TIME_SECONDS then print(string.format("  - Filter: Skipping, Time %s (%s s)<%d s.",tostring(riftData.TimeLeft),riftData.TimeSeconds,MINIMUM_RIFT_TIME_SECONDS)); passedTimeFilter=false else print(string.format("  - Filter: Time %s (%s s) OK.",tostring(riftData.TimeLeft),riftData.TimeSeconds)); passedTimeFilter=true end else print("  - Time unknown. Assuming passes filter."); passedTimeFilter=true end
+                    else print("  - Skipping details (Multi Filter fail).") end
+
+                    if passedMultiplierFilter and passedTimeFilter then
+                        print(string.format(">>> MATCH VALID: %s | Time: %s (%s s) | H: %s | Multi: %s <<<", riftData.DisplayName, tostring(riftData.TimeLeft), tostring(riftData.TimeSeconds or "??"), tostring(riftData.Height), tostring(riftData.Multiplier)))
+                        error(riftData) -- Use error to stop the pcall and return the data
+                    else print("  - Invalid/Filtered. Continuing...") end
+                end
             end
         end) -- End of pcall for processing a single island
 
