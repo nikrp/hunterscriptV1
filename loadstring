@@ -1,8 +1,8 @@
 --[[
-    Rift Finder Script - AUTO VERSION 1.9
+    Rift Finder Script - AUTO VERSION 1.10
     (Based on Manual V31.1)
 
-    - SPECIFIC WEBHOOKS ONLY: Re-enabled specific webhooks. Rift notifications are ONLY sent if the rift name exists in `SpecificRiftWebhooks`. Default RiftWebhookURL is ignored for finds.
+    - REFINED SPECIFIC WEBHOOKS: Reworked `sendRiftFoundNotification` to more clearly check for and send ONLY to URLs defined in `SpecificRiftWebhooks`. No default fallback.
     - EMBED UPDATES: Rift found embed author name ("discord.gg/rifthunter"), time field name ("Time Remaining"), and raw join link retained.
     - TIME LOGIC REVERTED: Uses original time finding logic.
     - FIND ALL RIFTS: Retained logic to find and notify for *all* matching rifts in a server before hopping.
@@ -33,10 +33,10 @@
 --// ######################## SETTINGS ########################
 
 -- --- Webhook URLs ---
-local RiftWebhookURL = "https://discord.com/api/webhooks/1365884302684065943/xEFryRlllaI3-geqOI1VAI4rRrEg1S7O11aEnUBslfHagPaOhJv_N5Ka_rIEp4FsJbWj" -- *** DEFAULT Webhook (NOT USED FOR RIFT FINDS in this version, only as a placeholder if needed elsewhere) ***
+-- local RiftWebhookURL = "..." -- DEFAULT Webhook (NOT USED FOR RIFT FINDS in this version)
 local HopWebhookURL = "https://discord.com/api/webhooks/1367734421846757396/H3Xu33wUAjxHlqIT64qLixxW77RJcwsg02iZaMgDFBZEQpRZt7Ufo-lILBk_nJdyNPfi" -- *** Webhook for HOPPING notifications ***
 local LogWebhookURL = "https://discord.com/api/webhooks/1367736721919315999/afw2j_udXzS5vCnvZiHaJvYhkxTEOavdNnUrY-bAWlYccbZyuzAqCfE7U9tEB8QszeG9" -- *** Webhook for ALL script logs (print/warn) ***
--- local AllFindsWebhookURL = "..." -- Removed - Notifications only go to specific/default
+-- local AllFindsWebhookURL = "..." -- Removed
 
 -- --- Specific Rift Webhooks (Map lowercase rift name to URL - ONLY THESE WILL BE NOTIFIED) ---
 local SpecificRiftWebhooks = {
@@ -255,7 +255,7 @@ local function attemptWebhookSend(targetUrl, encodedPayload, notificationType)
 end
 
 
--- Send Rift Found Webhook Message (Uses Specific or Default URL)
+-- Send Rift Found Webhook Message (Uses Specific URL ONLY)
 local function sendRiftFoundNotification(riftNameLower, payloadData)
     -- Determine the target webhook URL - ONLY use specific if defined
     local targetWebhookURL = SpecificRiftWebhooks[riftNameLower] -- Use specific URL if it exists
@@ -710,7 +710,7 @@ end
 
 --// Initial Load Actions (No GUI Creation)
 print("------------------------------------------------------")
-print("Rift Finder AUTO V1.8 Loaded") -- Updated Version
+print("Rift Finder AUTO V1.9 Loaded") -- Updated Version
 print(" - Log Destination:", SendLogsToWebhook and "Webhook" or "Console")
 print(" - Attempted to load blacklist from:", BLACKLIST_FILENAME)
 print(" - Blacklist will clear after", MAX_BLACKLIST_SIZE, "entries.")
