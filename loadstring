@@ -1,14 +1,13 @@
 --[[
     Rift Finder Script for Bubble Gum Simulator Infinity (or similar games)
-    AUTO VERSION: V1.4 - Instant Notify on Find, Notifier Send Logic, Hop Notify Disabled
+    AUTO VERSION: V1.5 - Specific Notify Only, Notifier Send Logic, Hop Notify Disabled
 
     FEATURES:
     - NO GUI: Configuration is done via boolean variables in the settings below.
-    - AUTO RUN: Executes search, notifies, and hops automatically upon execution.
-    - INSTANT NOTIFY: Sends webhook notification immediately when a matching rift is found during scan.
+    - AUTO RUN: Executes search, notifies (specific only), and hops automatically upon execution.
+    - SPECIFIC NOTIFY ONLY: Sends webhook notification ONLY to pre-configured specific webhooks for certain rift types.
     - WEBHOOK SENDING LOGIC: Uses the request/HttpService fallback mechanism.
-    - SIMPLIFIED WEBHOOKS (Rift Finds):
-        - Rift found notifications are ONLY sent to the 'AllFindsWebhookURL'.
+    - ALL FINDS WEBHOOK DISABLED: No notifications sent to the general 'AllFindsWebhookURL'.
     - HOP NOTIFICATIONS DISABLED: No webhook sent when hopping servers.
     - ENHANCED DEBUGGING: Retains detailed logging for webhook sending failures.
     - MULTI-FIND: Finds and notifies for ALL matching rifts in a server before hopping.
@@ -19,7 +18,7 @@
     - BLACKLIST: Retains persistent blacklist logic with size limit.
 
     *** USER ACTION REQUIRED: ***
-    1. CONFIGURE WEBHOOKS: Fill in 'AllFindsWebhookURL'. Optionally configure 'LogWebhookURL'. ('HopWebhookURL' is ignored).
+    1. CONFIGURE WEBHOOKS: Ensure 'SpecificRiftWebhooks' table below has the correct URLs for the rifts you want specific notifications for. Optionally configure 'LogWebhookURL'. ('AllFindsWebhookURL' & 'HopWebhookURL' are ignored for notifications).
     2. CONFIGURE SEARCH: Set 'true' or 'false' for each Rift Type and Multiplier Filter.
     3. CONFIGURE LOGGING: Set 'SendLogsToWebhook' to 'true' if you want logs sent there.
     4. EXECUTOR SUPPORT: Blacklist persistence requires executor support for file operations (readfile/writefile/isfile). Adapt BLACKLIST_FILENAME path if needed.
@@ -30,9 +29,22 @@
 --//                          USER CONFIGURATION                            \\
 --//========================================================================\\
 
--- *** Core Webhooks (REQUIRED) ***
-local AllFindsWebhookURL = "https://discord.com/api/webhooks/1367753252472619008/T08XZROK0Slu2dxy8575RnGZL8oaj2JxOTqKydQTnvIlsR-O5_iumIMXJbLBbAoBufuI" -- *** Rift notifications ONLY go here ***
+-- *** Core Webhooks ***
+local AllFindsWebhookURL = "YOUR_ALL_FINDS_URL_HERE" -- *** No longer used for rift notifications ***
 local HopWebhookURL = "YOUR_HOP_WEBHOOK_URL_HERE" -- *** No longer used - Hop notifications are disabled ***
+
+-- *** Specific Rift Webhooks (REQUIRED for specific notifications) ***
+-- Notifications will ONLY be sent if a rift matches a key in this table.
+local SpecificRiftWebhooks = {
+    ["rainbow-egg"] = "https://discord.com/api/webhooks/1367744311008956486/KCHFuRYjpHkpHdz2BjfB2zU9o0Tf43PYLH3WE6iwArMBahLd34_sjvRIomDz5Eph95Pv",
+    ["void-egg"] = "https://discord.com/api/webhooks/1367744483650703440/6jWdoyLd_M2V8eeCROrxhsmwbcHS3BpNZuDEvrFYn1eW1DLtuwCG2odhXHKVGY5IRr81",
+    ["nightmare-egg"] = "https://discord.com/api/webhooks/1367744623904292924/rNja_qhRgIP_YP-LARSwWZksoImL81HjDd-_HWvX5IIDFv1cQzl5GF4FsyckBsmps22k",
+    ["royal-chest"] = "https://discord.com/api/webhooks/1367744720725479494/0phV2HWkXp8Qjbjvmo7MtpOKjPV2rhD-VN2Vl0t5UfoKRRSOCb6wIWIDYGNjRvzAn8c5",
+    ["golden-chest"] = "https://discord.com/api/webhooks/1367744837801087007/-V26OqXY8rhWab_gbTh0W9t3JXXOoL4kh98dPBdaUZUM3XIzECUPNFG9SHerANC-PHqL",
+    ["bubble-rift"] = "https://discord.com/api/webhooks/1367751727809560626/HxjDXhbzkFtn2kvlP-svqAxx2Fp2DBXEP6uDb8RFekTAhDD1hElxWlrvcl0kprEvrNzg", -- 250x bubble
+    ["silly-egg"] = "https://discord.com/api/webhooks/1367751821220777984/BvcLy8ObGDt6b22Ap4E8y6_znd22gh2ilAh8nt0Y6BH0K6RgyGzePLjqN5g44bZnJqwK"
+    -- Add more entries here if needed: ["rift-internal-name"] = "WEBHOOK_URL",
+}
 
 -- *** Optional Log Webhook ***
 local LogWebhookURL = "https://discord.com/api/webhooks/1367736721919315999/afw2j_udXzS5vCnvZiHaJvYhkxTEOavdNnUrY-bAWlYccbZyuzAqCfE7U9tEB8QszeG9" -- Webhook for script logs (Still used if enabled)
@@ -291,6 +303,64 @@ logMessage("info", "Initial blacklist size after load attempt: " .. countBlackli
 
 --// Functions (Core Logic)
 
+-- Send Rift Found Notification (ONLY sends to Specific Webhooks if configured)
+local function sendSpecificRiftNotification(riftData)
+    -- Check if a specific webhook URL exists for this rift type
+    local targetWebhookURL = SpecificRiftWebhooks[riftData.NameLower]
+
+    if not targetWebhookURL then
+        logMessage("debug", "No specific webhook configured for rift type: " .. riftData.NameLower .. ". Skipping notification.")
+        return -- Exit if no specific webhook is set for this type
+    end
+
+    -- Proceed with sending if a specific URL was found
+    local pCount = #Players:GetPlayers()
+    local maxPlayers = Players.MaxPlayers
+    local joinLink = string.format("roblox://experiences/start?placeId=%d&gameInstanceId=%s", PlaceId, CurrentJobId)
+    local serverMsg = "JobId: " .. (CurrentJobId or "??")
+    local title = riftData.DisplayName
+    local imgUrl = RiftImageMapping[riftData.NameLower]
+    local footerText = string.format("discord.gg/rifthunter - The best ever rift finding service | %s", os.date("!%Y-%m-%dT%H:%M:%SZ"))
+
+    -- Format Time Remaining String
+    local timeString = "Unknown"
+    if riftData.TimeSeconds then
+        local minutes = math.floor(riftData.TimeSeconds / 60)
+        local seconds = riftData.TimeSeconds % 60
+        if minutes > 0 then
+            timeString = string.format("%d min %02d sec (%d s)", minutes, seconds, riftData.TimeSeconds)
+        else
+            timeString = string.format("%d sec", riftData.TimeSeconds)
+        end
+    elseif type(riftData.TimeLeft) == "string" then
+        timeString = riftData.TimeLeft
+    end
+
+    local embed = {
+        title = "✅ Rift Found: " .. title,
+        color = 65280, -- Green color
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        fields = {
+            {name="✨ Multi", value=tostring(riftData.Multiplier), inline=true},
+            {name="🕒 Time Remaining", value=timeString, inline=true},
+            {name="📏 Height", value=tostring(riftData.Height), inline=true},
+            {name="🧍 Players", value=string.format("%d/%d", pCount, maxPlayers), inline=true},
+            {name="🆔 Server", value=serverMsg, inline=true},
+            {name="🔗 Join", value=joinLink, inline=false},
+            {name="❓ How to use", value="Copy and paste the link above into your browser's address bar.", inline=false}
+        },
+        footer = { text = footerText }
+    }
+    if imgUrl and imgUrl ~= "PASTE_URL_HERE" and string.find(imgUrl, "https://") then embed.thumbnail = { url = imgUrl }; logMessage("debug", " - Added thumbnail for " .. title) else logMessage("debug", " - No valid thumbnail for " .. title) end
+
+    local payload = { username = "discord.gg/rifthunter", embeds = { embed } }
+
+    -- Send ONLY to the Specific Webhook found
+    logMessage("info", "Sending notification for " .. title .. " to Specific (" .. riftData.NameLower .. ") webhook...")
+    sendWebhookGeneric(targetWebhookURL, payload, "Specific Rift (" .. riftData.NameLower .. ")")
+end
+
+
 -- Send Hopping Webhook Notification (Function remains but call is disabled)
 local function sendHopNotification(reason)
     logMessage("info", "Hop notification sending is disabled.")
@@ -455,18 +525,18 @@ local function parseTime(timeText)
 end
 
 
--- Find Target Rifts (Scans, Filters, and NOTIFIES IMMEDIATELY)
--- Returns: boolean (true if any valid rift was found and notified, false otherwise)
-local function findTargetRiftsAndNotify()
+-- Find Target Rifts (Scans and Filters, returns list)
+-- Returns: table (list of riftData tables for valid finds)
+local function findTargetRifts()
     logMessage("info", string.format("Searching... (Filter: AnyM=%s, 5x=%s, 10x=%s, 25x=%s, OrAbove=%s, MinTime=%ds)",
         tostring(SearchMultiplierAny), tostring(SearchMultiplier5x), tostring(SearchMultiplier10x), tostring(SearchMultiplier25x), tostring(SearchMultiplierOrAbove), MINIMUM_RIFT_TIME_SECONDS))
     logMessage("debug", "Waiting for folder '"..RENDERED_FOLDER_NAME.."' in workspace...")
-    local renderedFolder = workspace:WaitForChild(RENDERED_FOLDER_NAME, WAIT_FOR_FOLDERS_TIMEOUT); if not renderedFolder then logMessage("error", "'"..RENDERED_FOLDER_NAME.."' folder not found."); return false end
+    local renderedFolder = workspace:WaitForChild(RENDERED_FOLDER_NAME, WAIT_FOR_FOLDERS_TIMEOUT); if not renderedFolder then logMessage("error", "'"..RENDERED_FOLDER_NAME.."' folder not found."); return {} end
     logMessage("debug", "Waiting for folder '"..TARGET_RIFTS_FOLDER_NAME.."' inside '"..RENDERED_FOLDER_NAME.."'...")
-    local islandsFolder = renderedFolder:WaitForChild(TARGET_RIFTS_FOLDER_NAME, WAIT_FOR_FOLDERS_TIMEOUT); if not islandsFolder then logMessage("error", "'"..TARGET_RIFTS_FOLDER_NAME.."' folder not found."); return false end
+    local islandsFolder = renderedFolder:WaitForChild(TARGET_RIFTS_FOLDER_NAME, WAIT_FOR_FOLDERS_TIMEOUT); if not islandsFolder then logMessage("error", "'"..TARGET_RIFTS_FOLDER_NAME.."' folder not found."); return {} end
     logMessage("info", "Scanning folder: " .. islandsFolder:GetFullName())
 
-    local foundAnyRift = false -- Flag to track if any notification was sent
+    local foundRiftsList = {} -- Store valid finds here
 
     for _, island in ipairs(islandsFolder:GetChildren()) do
         if not (island:IsA("Model") or island:IsA("Folder")) then continue end
@@ -547,36 +617,8 @@ local function findTargetRiftsAndNotify()
             -- Check if ALL filters passed for this rift
             if passedMultiplierFilter and passedTimeFilter then
                 logMessage("info", string.format(">>> MATCH VALID: %s | Time: %s (%s s) | H: %s | Multi: %s <<<", riftData.DisplayName, tostring(riftData.TimeLeft), tostring(riftData.TimeSeconds or "??"), tostring(riftData.Height), tostring(riftData.Multiplier)))
-
-                -- *** SEND NOTIFICATION IMMEDIATELY ***
-                local pCount = #Players:GetPlayers()
-                local maxPlayers = Players.MaxPlayers
-                local joinLink = string.format("roblox://experiences/start?placeId=%d&gameInstanceId=%s", PlaceId, CurrentJobId)
-                local serverMsg = "JobId: " .. (CurrentJobId or "??")
-                local title = riftData.DisplayName
-                local imgUrl = RiftImageMapping[riftData.NameLower]
-                local footerText = string.format("discord.gg/rifthunter - The best ever rift finding service | %s", os.date("!%Y-%m-%dT%H:%M:%SZ"))
-                local timeString = "Unknown"
-                if riftData.TimeSeconds then local minutes = math.floor(riftData.TimeSeconds / 60); local seconds = riftData.TimeSeconds % 60; if minutes > 0 then timeString = string.format("%d min %02d sec (%d s)", minutes, seconds, riftData.TimeSeconds) else timeString = string.format("%d sec", riftData.TimeSeconds) end elseif type(riftData.TimeLeft) == "string" then timeString = riftData.TimeLeft end
-
-                local embed = {
-                    title = "✅ Rift Found: " .. title, color = 65280, timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-                    fields = {
-                        {name="✨ Multi", value=tostring(riftData.Multiplier), inline=true}, {name="🕒 Time Remaining", value=timeString, inline=true},
-                        {name="📏 Height", value=tostring(riftData.Height), inline=true}, {name="🧍 Players", value=string.format("%d/%d", pCount, maxPlayers), inline=true},
-                        {name="🆔 Server", value=serverMsg, inline=true}, {name="🔗 Join", value=joinLink, inline=false},
-                        {name="❓ How to use", value="Copy and paste the link above into your browser's address bar.", inline=false}
-                    }, footer = { text = footerText }
-                }
-                if imgUrl and imgUrl ~= "PASTE_URL_HERE" and string.find(imgUrl, "https://") then embed.thumbnail = { url = imgUrl }; logMessage("debug", " - Added thumbnail for " .. title) else logMessage("debug", " - No valid thumbnail for " .. title) end
-                local payload = { username = "discord.gg/rifthunter", embeds = { embed } }
-
-                logMessage("info", "Sending notification for " .. title .. " to All Finds webhook...")
-                sendWebhookGeneric(AllFindsWebhookURL, payload, "All Finds")
-                -- *** END SEND NOTIFICATION ***
-
-                foundAnyRift = true -- Mark that at least one rift was found and notified
-                task.wait(0.1) -- Small delay before checking next rift instance
+                -- Add the valid rift data to the list to be returned
+                table.insert(foundRiftsList, riftData)
             else
                 logMessage("debug", "  - Invalid/Filtered. Continuing scan...")
             end
@@ -585,8 +627,8 @@ local function findTargetRiftsAndNotify()
         end
     end
 
-    logMessage("info", "Scan complete.");
-    return foundAnyRift -- Return true if any rift was found, false otherwise
+    logMessage("info", "Scan complete. Found " .. #foundRiftsList .. " valid rift(s).");
+    return foundRiftsList -- Return the list of valid rifts
 end
 
 -- Get Player Count
@@ -602,12 +644,18 @@ function startSearchAndHopLogic()
         return -- Stop execution here as hop was attempted
     end
 
-    -- Scan for rifts and notify immediately within the function
-    local riftFoundDuringScan = findTargetRiftsAndNotify()
+    -- Scan for rifts and get the list of valid finds
+    local foundRiftsList = findTargetRifts()
 
-    -- Decide hop reason based on whether any rift was found
-    if riftFoundDuringScan then
-        logMessage("info", "Notifications sent (if any found). Hopping server...")
+    -- Check if any valid rifts were found
+    if #foundRiftsList > 0 then
+        logMessage("info", "MATCH(ES) FOUND! Notifying for " .. #foundRiftsList .. " specific rift(s)...")
+        -- Iterate through the found list and send specific notifications
+        for _, riftData in ipairs(foundRiftsList) do
+            sendSpecificRiftNotification(riftData) -- Call the specific notification function
+            task.wait(0.5) -- Small delay between notifications if multiple found
+        end
+        logMessage("info", "Specific notifications sent (if configured). Hopping server...")
         attemptHop("Found matching rift(s)") -- Hop because something matched filters
     else
         logMessage("info", "No valid rift found matching filters. Hopping...")
@@ -618,14 +666,14 @@ end
 
 --// Initial Load Actions
 logMessage("info", "------------------------------------------------------")
-logMessage("info", "Rift Finder AUTO Loaded (V1.4 - Instant Notify)")
+logMessage("info", "Rift Finder AUTO Loaded (V1.5 - Specific Notify Only)")
 logMessage("info", " - Attempted to load blacklist from: " .. BLACKLIST_FILENAME)
 logMessage("info", " - Blacklist will clear after " .. MAX_BLACKLIST_SIZE .. " entries.")
-logMessage("info", " - Rift Notifications ONLY sent to AllFindsWebhookURL (Instantly on find).")
+logMessage("info", " - Rift Notifications ONLY sent to Specific Webhooks (if configured).")
 logMessage("info", " - Hop Notifications DISABLED.")
 logMessage("info", " - Logging to: " .. (SendLogsToWebhook and "Webhook" or "Console"))
 logMessage("info", " - Check console/webhook for search details & webhook errors.")
-logMessage("info", " - Ensure Webhook URLs and Search Toggles are set correctly.")
+logMessage("info", " - Ensure Specific Rift Webhook URLs and Search Toggles are set correctly.")
 logMessage("info", " - Blacklist persistence requires executor file functions.")
 logMessage("info", "*** MANUAL RE-EXECUTION AFTER TELEPORT IS REQUIRED! ***")
 logMessage("info", "------------------------------------------------------")
